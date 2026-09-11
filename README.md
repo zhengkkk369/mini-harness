@@ -143,3 +143,49 @@ For the plain terminal interface:
 ```sh
 uv run --locked mini-harness
 ```
+
+## Benchmark adapters
+
+Run these commands from the repository root after installation. The adapters in
+[`bench/`](bench/) connect mini-harness to Harbor and SWE-bench cloud scoring.
+The examples use OpenAI; for DeepSeek, export `DEEPSEEK_API_KEY` and change the
+model to `deepseek/deepseek-v4-flash`.
+
+### Harbor
+
+With Docker running, evaluate one SWE-bench Verified task using the
+[Harbor adapter](bench/adapter.py):
+
+```sh
+export OPENAI_API_KEY="your-openai-api-key"
+PYTHONPATH=. uv run --with "harbor==0.20.0" harbor run \
+  -d swebench-verified \
+  --agent bench.adapter:MiniHarnessAgent \
+  --model openai/gpt-4.1 --env docker --n-tasks 1 -n 1
+```
+
+Harbor runs the agent and verifier, saving results and ATIF trajectories under
+`jobs/`. Remove `--n-tasks 1` to evaluate the full dataset; `-n` controls concurrency.
+See [Harbor's custom-agent guide](https://www.harborframework.com/docs/agents).
+
+### SWE-bench cloud scoring with sb-cli
+
+The [cloud entry point](bench/sb_cli.py) uses Modal to run the agent, exports its
+patches, then submits them to sb-cli for scoring. Set `OPENAI_API_KEY` as above,
+obtain a [verified sb-cli API key](https://www.swebench.com/sb-cli/authentication/),
+and sign in to [Modal](https://modal.com/docs/cli/latest/setup):
+
+```sh
+export SWEBENCH_API_KEY="your-verified-sb-cli-api-key"
+uv run --with-requirements bench/requirements-sb-cli.txt modal setup
+uv run --with-requirements bench/requirements-sb-cli.txt \
+  python -m bench.sb_cli run \
+  --job-dir jobs/sb-cli-smoke --run-id mini-harness-smoke \
+  --model openai/gpt-4.1 --n-tasks 1
+```
+
+Add `--dry-run` to the final command to preview without launching a job. Replace
+`--n-tasks 1` with `--all` for all 500 tasks, using a new job directory and run ID
+for each run. Predictions are saved to `jobs/sb-cli-smoke/predictions.json` and
+reports to `jobs/sb-cli-smoke/sb-cli-reports/`. The `generate`, `export`, and
+`submit` subcommands also let you run each stage separately.
