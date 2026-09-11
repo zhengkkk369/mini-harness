@@ -77,12 +77,9 @@ class DeepSeekAgent:
         streaming = False
         truncated = None
         with client.chat.completions.stream(
-            model = cfg.model_main,
             tools = self.tools,
-            messages = self.message,
-            temperature = cfg.temp_set,
-            extra_body = cfg.thinking_main,
-            max_tokens = cfg.max_tokens_main,
+            messages = cfg.request_messages(self.message),
+            **cfg.request_options(),
             stream_options = {'include_usage': True}
         ) as e:
             for d in e:
@@ -245,7 +242,7 @@ class DeepSeekAgent:
     def run_task(self, task: str, cfg = CONFIG) -> Result:
         self.message = list(self.system)
         client = OpenAI(
-            api_key = os.environ.get("DEEPSEEK_API_KEY"),
+            api_key = cfg.api_key,
             base_url = cfg.base_url,
             max_retries = 0
         ) 
@@ -278,7 +275,7 @@ class DeepSeekAgent:
     def run(self, cfg = CONFIG) -> None:
         self.message = self._load_memory(cfg = cfg)
         client = OpenAI(
-            api_key = os.environ.get("DEEPSEEK_API_KEY"),
+            api_key = cfg.api_key,
             base_url = cfg.base_url,
             max_retries = 0
         )

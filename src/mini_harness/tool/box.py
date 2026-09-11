@@ -644,19 +644,16 @@ completed the task by giving the summary and analyzing report
     start = time.time()
     print(f'[{inp.agent_type.value}]: {inp.task_description}')
     client = OpenAI(
-        api_key = os.environ.get("DEEPSEEK_API_KEY"),
+        api_key = cfg.api_key,
         base_url = cfg.base_url,
         max_retries = 0
     )
     executer = ToolExecution(regis, _for_sub, cfg = cfg)
     for turn in range(cfg.max_turns_sub):
         response = retry_call(lambda: client.chat.completions.create(
-            model = cfg.model_sub,
-            messages = sub_message,
+            **cfg.request_options(sub=True),
+            messages = cfg.request_messages(sub_message),
             tools = tool_list,
-            max_tokens = cfg.max_tokens_sub,
-            extra_body = cfg.thinking_sub,
-            temperature = cfg.temp_set,
             stream = False
         ), cfg = cfg)
         message = response.choices[0].message
@@ -718,4 +715,3 @@ if not (READ_TOOLS | WRITE_TOOLS) <= _names:
     
 
     
-

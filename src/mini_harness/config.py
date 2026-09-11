@@ -9,9 +9,6 @@ from mini_harness.bench_profile import BENCH_OVERRIDE
 
 load_dotenv(find_dotenv(usecwd=True))
 
-if not os.environ.get('DEEPSEEK_API_KEY'):
-    raise RuntimeError(f'[api error]: the api key no found')
-
 def default_workspace() -> Path:
     env = os.environ.get("MINI_HARNESS_WORK_SPACE")
     return Path(env).resolve() if env else Path.cwd()
@@ -20,6 +17,9 @@ def default_workspace() -> Path:
 class Config:
     work_space: Path = default_workspace()
     profile: str = 'local'
+    provider: str = 'deepseek'
+    api_key_env: str = 'DEEPSEEK_API_KEY'
+    reasoning_effort: str|None = None
 
     model_main: str = 'deepseek-v4-flash'
     model_sub: str = 'deepseek-v4-flash'
@@ -193,6 +193,8 @@ O2. run_subagent (explore_agent, coding_agent, planning_agent): use it when a su
 
     @property
     def thinking_main(self) -> dict:
+        if self.provider == 'openai':
+            return {}
         return {
             'thinking': {
                 'type': self.think_main
@@ -201,6 +203,8 @@ O2. run_subagent (explore_agent, coding_agent, planning_agent): use it when a su
 
     @property
     def thinking_sub(self) -> dict:
+        if self.provider == 'openai':
+            return {}
         return {
             'thinking': {
                 'type': self.think_sub
@@ -208,17 +212,94 @@ O2. run_subagent (explore_agent, coding_agent, planning_agent): use it when a su
         }
 
     @property
+    def api_key(self) -> str|None:
+        return os.environ.get('MINI_HARNESS_API_KEY') or os.environ.get(self.api_key_env)
+
+    def request_options(self, sub: bool = False) -> dict:
+        options = {'model': self.model_sub if sub else self.model_main}
+        limit = self.max_tokens_sub if sub else self.max_tokens_main
+        if self.provider == 'openai':
+            options['max_completion_tokens'] = limit
+            if self.reasoning_effort:
+                options['reasoning_effort'] = self.reasoning_effort
+        else:
+            options.update(
+                max_tokens=limit,
+                temperature=self.temp_set,
+                extra_body=self.thinking_sub if sub else self.thinking_main,
+            )
+        return options
+
+    def request_messages(self, messages: list) -> list:
+        if self.provider != 'openai':
+            return messages
+        return [
+            {key: value for key, value in message.items()
+             if key not in {'reasoning_content', 'annotations', 'parsed'}}
+            for message in messages
+        ]
+
+    @property
     def bash_env(self) -> dict:
+        secrets = {'MINI_HARNESS_API_KEY', 'OPENAI_API_KEY', 'DEEPSEEK_API_KEY',
+                   self.api_key_env.upper()}
         return {
             key: value for key, value in os.environ.items()
-            if not any(fnmatch.fnmatch(key.upper(), name) for name in self.bash_env_deny)
+            if key.upper() not in secrets
+            and not any(fnmatch.fnmatch(key.upper(), name) for name in self.bash_env_deny)
         }
 
 
 def build_config() -> Config:
-    if os.environ.get("MINI_HARNESS_PROFILE") == 'bench':
-        return Config(**BENCH_OVERRIDE)
-    else:
-        return Config()
+    model = os.environ.get('MINI_HARNESS_MODEL')
+    prefix = model.partition('/')[0] if model else None
+    inferred = prefix if prefix in {'openai', 'deepseek'} else (
+        'deepseek' if not model or model.startswith('deepseek-') else 'openai'
+    )
+    provider = os.environ.get('MINI_HARNESS_PROVIDER', inferred).lower()
+    if provider not in {'openai', 'deepseek'}:
+        raise ValueError(f'Unsupported provider: {provider}')
+    if prefix in {'openai', 'deepseek'}:
+        if prefix != provider:
+            raise ValueError('Model prefix conflicts with MINI_HARNESS_PROVIDER')
+        model = model.partition('/')[2]
+    overrides = dict(BENCH_OVERRIDE) if os.environ.get('MINI_HARNESS_PROFILE') == 'bench' else {}
+    overrides.update(provider=provider, api_key_env=os.environ.get(
+        'MINI_HARNESS_API_KEY_ENV', f'{provider.upper()}_API_KEY'))
+    if provider == 'openai':
+        overrides.update(
+            model_main='gpt-4.1', model_sub='gpt-4.1',
+            base_url=os.environ.get('OPENAI_BASE_URL') or 'https://api.openai.com/v1',
+            max_tokens_main=8192, max_tokens_sub=8192, compact_limit=64000,
+            think_main='default', think_sub='default',
+        )
+    if model is not None:
+        if not model.strip():
+            raise ValueError('MINI_HARNESS_MODEL must not be empty')
+        overrides.update(model_main=model, model_sub=model)
+    for env_name, field in {
+        'MINI_HARNESS_BASE_URL': 'base_url',
+        'MINI_HARNESS_SUB_MODEL': 'model_sub',
+        'MINI_HARNESS_REASONING_EFFORT': 'reasoning_effort',
+    }.items():
+        if value := os.environ.get(env_name):
+            overrides[field] = value
+    if overrides.get('reasoning_effort') and provider == 'openai':
+        overrides.update(think_main=overrides['reasoning_effort'],
+                         think_sub=overrides['reasoning_effort'])
+    for field in ('max_tokens_main', 'max_tokens_sub', 'compact_limit'):
+        if value := os.environ.get(f'MINI_HARNESS_{field.upper()}'):
+            if int(value) <= 0:
+                raise ValueError(f'{field} must be positive')
+            overrides[field] = int(value)
+    sub_model = overrides.get('model_sub')
+    if sub_model and sub_model.partition('/')[0] in {'openai', 'deepseek'}:
+        prefix, _, name = sub_model.partition('/')
+        if prefix != provider or not name.strip():
+            raise ValueError('Sub-model must use the same provider as the main model')
+        overrides['model_sub'] = name
+    return Config(**overrides)
 
 CONFIG = build_config()
+if not CONFIG.api_key:
+    raise RuntimeError(f'[api error]: set {CONFIG.api_key_env} or MINI_HARNESS_API_KEY')

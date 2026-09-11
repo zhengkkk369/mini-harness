@@ -83,7 +83,7 @@ def agent_worker() -> None:
         os.environ["MINI_HARNESS_PROFILE"] = "local"
         os.environ["MINI_HARNESS_WORK_SPACE"] = str(ROOT)
         if demo:
-            os.environ["DEEPSEEK_API_KEY"] = "offline-demo-not-a-real-key"
+            os.environ["MINI_HARNESS_API_KEY"] = "offline-demo-not-a-real-key"
         sys.path.insert(0, str(ROOT / "src"))
         from openai import OpenAI
         from openai.types.chat import ChatCompletionMessage
@@ -166,7 +166,7 @@ def agent_worker() -> None:
         box.ToolExecution.execute_tool = execute
         core.log_tool = lambda *args, **kwargs: None
         with contextlib.redirect_stdout(Output()), contextlib.redirect_stderr(Output()):
-            with OpenAI(api_key=os.environ.get("DEEPSEEK_API_KEY"), base_url=CONFIG.base_url,
+            with OpenAI(api_key=CONFIG.api_key, base_url=CONFIG.base_url,
                         max_retries=0, timeout=90) as client:
                 agent._save_memory()
                 result = agent._run_turn(client, executor)
@@ -446,10 +446,6 @@ class MiniHarness(App):
         prompt = self.query_one("#prompt", Input)
         text = prompt.value.strip()
         if self.busy or not text:
-            return
-        if not self.demo and not os.environ.get("DEEPSEEK_API_KEY"):
-            self.notify("Export DEEPSEEK_API_KEY in your shell, then restart. Use --demo to try offline.",
-                        title="API key needed", severity="warning", timeout=8)
             return
         prompt.value = ""
         self.busy, self.cancelling, self.started = True, False, time.monotonic()

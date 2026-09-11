@@ -46,7 +46,7 @@ Please summarize those conversation history into a working summary report, follo
 
     def _request_agent(self, client: OpenAI, user_prompt: str, cfg = CONFIG) -> str|None:
         response = client.chat.completions.create(
-            model = cfg.model_sub,
+            **cfg.request_options(sub=True),
             messages = [
                 {
                     'role': 'system',
@@ -57,9 +57,6 @@ Please summarize those conversation history into a working summary report, follo
                     'content': user_prompt
                 }
             ],
-            temperature = cfg.temp_set,
-            extra_body = cfg.thinking_sub,
-            max_tokens = cfg.max_tokens_sub,
             stream = False
         )
         return response.choices[0].message.content
@@ -100,4 +97,3 @@ Please summarize those conversation history into a working summary report, follo
 COMPACT = CompactContent()
             
             
-
