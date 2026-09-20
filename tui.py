@@ -77,6 +77,7 @@ def agent_worker() -> None:
         def flush(self) -> None:
             channel.flush()
 
+    bridge = None
     try:
         request = json.loads(sys.stdin.readline())
         demo = request.get("demo", False)
@@ -88,6 +89,7 @@ def agent_worker() -> None:
         from openai import OpenAI
         from openai.types.chat import ChatCompletionMessage
         import mini_harness.agent as core
+        from mini_harness import mcp
         from mini_harness.config import CONFIG
         from mini_harness.tool import box
 
@@ -105,8 +107,9 @@ def agent_worker() -> None:
                     needs_tool = self.message[-1]["role"] == "user"
                     if "what can mini-harness do" in prompt.lower():
                         needs_tool = False
-                        text = ("Nine tools, context compaction, and request retries in a small Python "
-                                "agent. Give me a task and follow each step as it streams here.")
+                        text = ("Ten tools, context compaction, retrievable memory and request "
+                                "retries in a small Python agent. Give me a task and follow each "
+                                "step as it streams here.")
                     elif "beginner" in prompt.lower() or "learn agents" in prompt.lower():
                         needs_tool = False
                         text = ("Start with agent.py, then explore tool/box.py, compact.py, and "
@@ -133,6 +136,10 @@ def agent_worker() -> None:
                 return result
 
         tools = list(box.TOOLS)
+        if not demo:
+            # MCP servers are separate processes, so this worker owns them.
+            bridge = mcp.MCPBridge(cfg=CONFIG).start()
+            tools = [*tools, *bridge.definitions]
         if demo:
             tools = [replace(t, function=lambda inp: "agent.py  compact.py  config.py  retry_request.py  tool/\n[Offline simulation]")
                      if t.name == "run_bash" else t for t in tools]
@@ -176,6 +183,9 @@ def agent_worker() -> None:
         emit("error", text="Cancelled before the agent finished starting.")
     except Exception as error:
         emit("error", text=f"{type(error).__name__}: {error}")
+    finally:
+        if bridge is not None:
+            bridge.close()
 
 
 class ToolConfirmation(ModalScreen[bool]):

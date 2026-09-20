@@ -130,7 +130,9 @@ def _to_api_tool(tools: list) -> list[dict]:
             'function': {
                 'name': t.name,
                 'description': t.description,
-                'parameters': t.parameters.model_json_schema()
+                # A schema is only supplied by tools that come from outside, such
+                # as MCP servers; everything defined here derives it from its model.
+                'parameters': t.schema if t.schema is not None else t.parameters.model_json_schema()
             }
         } for t in tools
     ]
@@ -873,6 +875,9 @@ def _validate_definition(definition: 'ToolDefinition') -> None:
     if cfg_param is not None and cfg_param.kind is cfg_param.POSITIONAL_ONLY:
         raise ValueError(f'[tool contract]: {name}.function takes cfg as positional-only, '
                          'but the executor calls it as cfg=...')
+    if definition.schema is not None:
+        if not isinstance(definition.schema, dict) or definition.schema.get('type') != 'object':
+            raise ValueError(f'[tool contract]: {name}.schema must be a JSON Schema object')
     return
 
 
@@ -910,6 +915,9 @@ class ToolDefinition:
     function: Callable
     risky: bool
     wants_cfg: bool = field(init = False, default = False)
+    # Set only for tools described by an external JSON Schema. `parameters` is
+    # still what validates a call; this is what the model is told.
+    schema: dict|None = None
 
     def __post_init__(self) -> None:
         _validate_definition(self)

@@ -16,13 +16,14 @@
 
 - **Small, but complete.** About 2,300 lines of Python: ten tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 375 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 427 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
-  gates, the ten tools, context compaction, configuration and the sandbox
-  command builder.
+  gates, the ten tools, context compaction, retrievable memory, MCP bridging,
+  configuration and the sandbox command builder.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
-  The definition contract is enforced in code, not just written in the prompt.
+  The definition contract is enforced in code, not just written in the prompt,
+  and tools can be bridged in from an [MCP](https://modelcontextprotocol.io) server.
 - **Bounded and observable.** Optional token, cost and wall-clock budgets stop a
   run before it gets expensive, and an opt-in JSONL [trace](src/mini_harness/trace.py)
   records every turn, tool call, retry and compaction. The measured cost of that
@@ -235,6 +236,40 @@ export MINI_HARNESS_RECALL_LIMIT=10     # matches per query, default 5
 export MINI_HARNESS_RECALL_SNIPPET=800  # characters per match, default 400
 ```
 
+## MCP servers
+
+Tools can also come from an [MCP](https://modelcontextprotocol.io) server: a
+subprocess speaking JSON-RPC over stdio. The bridge performs the handshake, asks
+for the tool list, and wraps each remote tool in a `ToolDefinition`, so the model
+sees it exactly like a local one — same registry, same policy, same approval,
+same trace.
+
+```sh
+export MINI_HARNESS_MCP_SERVERS='fs=python -m fs_server /tmp;db=python -m db_server'
+uv run --locked mini-harness
+```
+
+Entries are separated by semicolons because a command contains spaces. Each is
+`name=command`, and its tools appear as `name__tool`, so two servers cannot
+collide. The CLI and the TUI own the server processes and stop them when the run
+ends.
+
+Two deliberate choices:
+
+- **The server's own schema is what the model is told.** Converting a JSON Schema
+  through a Pydantic model would flatten detail the server published, so the
+  declared schema is passed through unchanged; a generated model is used only to
+  refuse an obviously wrong call before it reaches the server.
+- **Remote tools ask for approval by default**, because a server can do anything.
+  Set `MINI_HARNESS_MCP_RISKY=false` to trust one.
+
+One unreachable server never stops a run: the failure is printed and traced as
+`mcp_error`, and the rest start normally.
+
+```sh
+export MINI_HARNESS_MCP_TIMEOUT=10   # seconds, bounds the handshake and every call
+```
+
 ## Get started
 
 ### 1. Download and install
@@ -316,6 +351,7 @@ uv run --locked pytest
 | `tests/test_parallel.py` | batch overlap (proved with a barrier, not a stopwatch) and eligibility |
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
+| `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
 
 For measurements rather than pass/fail, see [EXPERIMENTS.md](EXPERIMENTS.md) and
 `uv run python -m bench.experiments`.

@@ -24,6 +24,7 @@ def isolated_env(monkeypatch):
         "MINI_HARNESS_VERIFY_REQUIRED", "MINI_HARNESS_VERIFY_NUDGES",
         "MINI_HARNESS_DENY_TOOLS", "MINI_HARNESS_DENY_PATTERNS",
         "MINI_HARNESS_RECALL", "MINI_HARNESS_RECALL_LIMIT", "MINI_HARNESS_RECALL_SNIPPET",
+        "MINI_HARNESS_MCP_SERVERS", "MINI_HARNESS_MCP_TIMEOUT", "MINI_HARNESS_MCP_RISKY",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -146,6 +147,9 @@ def test_execution_defaults():
     assert cfg.recall_enabled is True
     assert cfg.recall_limit == 5
     assert cfg.recall_snippet == 400
+    assert cfg.mcp_servers == ()
+    assert cfg.mcp_timeout == 30.0
+    assert cfg.mcp_risky is True
     assert cfg.policy_deny_tools == ()
     assert cfg.policy_deny_patterns == ()
 
@@ -155,6 +159,7 @@ def test_execution_defaults():
     ("MINI_HARNESS_READ_ONLY", "read_only"),
     ("MINI_HARNESS_VERIFY_REQUIRED", "verify_required"),
     ("MINI_HARNESS_RECALL", "recall_enabled"),
+    ("MINI_HARNESS_MCP_RISKY", "mcp_risky"),
 ])
 def test_boolean_switches_are_read_from_the_environment(monkeypatch, variable, field):
     monkeypatch.setenv(variable, "true")
@@ -204,6 +209,36 @@ def test_deny_lists_are_split_on_commas(monkeypatch):
 def test_a_blank_deny_list_leaves_the_default(monkeypatch):
     monkeypatch.setenv("MINI_HARNESS_DENY_TOOLS", " , ")
     assert build_config().policy_deny_tools == ()
+
+
+# --------------------------------------------------------------------------- mcp
+
+
+def test_mcp_servers_are_split_on_semicolons(monkeypatch):
+    """Commands contain spaces, so they cannot be comma separated."""
+    monkeypatch.setenv("MINI_HARNESS_MCP_SERVERS",
+                       "fs=python -m fs_server /tmp;db=python -m db_server --dsn x")
+
+    assert build_config().mcp_servers == (
+        "fs=python -m fs_server /tmp",
+        "db=python -m db_server --dsn x",
+    )
+
+
+def test_a_blank_mcp_server_list_leaves_the_default(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_MCP_SERVERS", " ; ")
+    assert build_config().mcp_servers == ()
+
+
+def test_the_mcp_timeout_is_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_MCP_TIMEOUT", "5.5")
+    assert build_config().mcp_timeout == 5.5
+
+
+def test_a_non_positive_mcp_timeout_is_rejected(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_MCP_TIMEOUT", "0")
+    with pytest.raises(ValueError, match="must be positive"):
+        build_config()
 
 
 # --------------------------------------------------------------------------- no_proxy

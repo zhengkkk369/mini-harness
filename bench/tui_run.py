@@ -43,11 +43,12 @@ def load_tui():
     return tui
 
 
-async def drive(prompt: str, timeout: float, sessions: Path, size: tuple) -> int:
+async def drive(prompt: str, timeout: float, sessions: Path, size: tuple,
+                demo: bool = False) -> int:
     tui = load_tui()
     shutil.rmtree(sessions, ignore_errors=True)
     sessions.mkdir(parents=True, exist_ok=True)
-    app = tui.MiniHarness(demo=False, sessions_dir=sessions)
+    app = tui.MiniHarness(demo=demo, sessions_dir=sessions)
 
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
@@ -91,11 +92,13 @@ def main() -> int:
     parser.add_argument('--timeout', type=float, default=300.0)
     parser.add_argument('--sessions', default=str(ROOT / '.experiments' / 'tui-sessions'))
     parser.add_argument('--size', default='100x32', help='terminal size as WxH')
+    parser.add_argument('--demo', action='store_true',
+                        help='offline simulation; needs no API key and makes no model calls')
     args = parser.parse_args()
 
     width, _, height = args.size.partition('x')
     size = (int(width), int(height or 32))
-    return asyncio.run(drive(args.prompt, args.timeout, Path(args.sessions), size))
+    return asyncio.run(drive(args.prompt, args.timeout, Path(args.sessions), size, args.demo))
 
 
 if __name__ == '__main__':

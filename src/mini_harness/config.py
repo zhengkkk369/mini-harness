@@ -116,6 +116,12 @@ class Config:
     recall_limit: int = 5
     recall_snippet: int = 400
 
+    # MCP servers to bridge tools from, each written as 'name=command line'.
+    # Remote tools default to risky, because a server can do anything.
+    mcp_servers: tuple = ()
+    mcp_timeout: float = 30.0
+    mcp_risky: bool = True
+
     max_retry: int = 5
     retry_base: float = 2.0
     rate_retry: int = 6
@@ -382,9 +388,17 @@ def build_config() -> Config:
     for variable, name in (('MINI_HARNESS_PARALLEL_TOOLS', 'parallel_tools'),
                            ('MINI_HARNESS_READ_ONLY', 'read_only'),
                            ('MINI_HARNESS_VERIFY_REQUIRED', 'verify_required'),
-                           ('MINI_HARNESS_RECALL', 'recall_enabled')):
+                           ('MINI_HARNESS_RECALL', 'recall_enabled'),
+                           ('MINI_HARNESS_MCP_RISKY', 'mcp_risky')):
         if value := os.environ.get(variable):
             overrides[name] = env_flag(value, variable)
+    if timeout := os.environ.get('MINI_HARNESS_MCP_TIMEOUT'):
+        if float(timeout) <= 0:
+            raise ValueError('mcp_timeout must be positive')
+        overrides['mcp_timeout'] = float(timeout)
+    if servers := os.environ.get('MINI_HARNESS_MCP_SERVERS'):
+        # A command may contain spaces, so entries are separated by semicolons.
+        overrides['mcp_servers'] = tuple(part.strip() for part in servers.split(';') if part.strip())
     for field_name, variable in (('policy_deny_tools', 'MINI_HARNESS_DENY_TOOLS'),
                                  ('policy_deny_patterns', 'MINI_HARNESS_DENY_PATTERNS')):
         if value := os.environ.get(variable):
