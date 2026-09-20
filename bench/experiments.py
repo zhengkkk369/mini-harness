@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from mini_harness import agent as agent_module  # noqa: E402
 from mini_harness.agent import DeepSeekAgent  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
+from mini_harness.memory import Memory  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.box import TOOLS, ToolDefinition  # noqa: E402
 from mini_harness.trace import TRACE  # noqa: E402
@@ -297,6 +298,56 @@ def experiment_trace(repeats, turns):
     return rows
 
 
+RECALL_FACTS = [
+    ('deploy window', 'the deploy window is 02:00 to 04:00 UTC on weekdays'),
+    ('service token name', 'the service token is stored in SERVICE_TOKEN'),
+    ('listening port', 'the service listens on port 8443'),
+    ('retry budget', 'the retry budget is five attempts per request'),
+    ('database host', 'the database host is db.internal'),
+]
+FILLER = ('config cache worker queue schema index buffer handler parser session timeout '
+          'retry logger metric deploy rollout cluster shard replica').split()
+
+
+def _distractors(count):
+    """Deterministic filler text, so the measurement is reproducible."""
+    return [f'{FILLER[i % len(FILLER)]} {FILLER[(i * 7) % len(FILLER)]} '
+            f'{FILLER[(i * 13) % len(FILLER)]}' for i in range(count)]
+
+
+def experiment_recall(sizes):
+    """Does recall rank a planted detail first as the archive grows?"""
+    workdir = WORK / 'recall'
+    workdir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for size in sizes:
+        path = workdir / f'journal-{size}.jsonl'
+        removed = [{'role': 'tool', 'content': text} for text in _distractors(size)]
+        removed.extend({'role': 'user', 'content': fact} for _, fact in RECALL_FACTS)
+        path.write_text(json.dumps({'ts': 1.0, 'removed': removed}) + '\n', encoding='utf-8')
+        memory = Memory(path)
+
+        top1 = top3 = 0
+        samples = []
+        for query, fact in RECALL_FACTS:
+            start = time.perf_counter()
+            hits = memory.search(query, limit=3)
+            samples.append(time.perf_counter() - start)
+            if hits and hits[0].text == fact:
+                top1 += 1
+            if any(hit.text == fact for hit in hits):
+                top3 += 1
+        rows.append({
+            'distractors': size,
+            'entries': len(removed),
+            'queries': len(RECALL_FACTS),
+            'top1': top1,
+            'top3': top3,
+            'search_ms': statistics.median(samples) * 1000,
+        })
+    return rows
+
+
 def experiment_policy():
     """Which calls a deny policy refuses, and under which tag."""
     workdir = WORK / 'policy'
@@ -352,6 +403,14 @@ def render(results):
     for row in results['verify']:
         lines.append(f"| {row['scenario']} | {row['turns']} | {row['mutations']} | "
                      f"{row['nudges']} | {row['verified']} | {row['outcome']} |")
+    lines += ['', '## Retrievable memory', '',
+              'Planted facts searched for among deterministic distractors.',
+              '', '| distractors | archived | top-1 | top-3 | search (median) |',
+              '| ---: | ---: | ---: | ---: | ---: |']
+    for row in results['recall']:
+        lines.append(f"| {row['distractors']} | {row['entries']} | "
+                     f"{row['top1']}/{row['queries']} | {row['top3']}/{row['queries']} | "
+                     f"{row['search_ms']:.2f} ms |")
     lines += ['', '## Dispatch policy', '', '| call | ok | tag |', '| --- | --- | --- |']
     for row in results['policy']:
         lines.append(f"| {row['call']} | {row['ok']} | {row['tag']} |")
@@ -377,6 +436,7 @@ def main():
         'subagents': experiment_subagents(args.repeats, args.subagents, (0.02, 0.1)),
         'trace': experiment_trace(args.repeats, args.turns),
         'verify': experiment_verify(args.repeats),
+        'recall': experiment_recall((50, 200, 800)),
         'policy': experiment_policy(),
     }
     report = render(payload)

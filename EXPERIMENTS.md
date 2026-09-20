@@ -1,8 +1,8 @@
 # Harness experiments
 
 Measurements of the mini-harness mechanisms added in this repository: parallel
-tool execution, subagent concurrency, the event trace, the verification loop,
-and the dispatch policy.
+tool execution, subagent concurrency, the event trace, retrievable memory, the
+verification loop, and the dispatch policy.
 
 ## What these numbers are, and what they are not
 
@@ -47,9 +47,9 @@ not instant (a network fetch, a subprocess, a large file). Six calls with
 
 | Injected latency | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: |
-| 0 ms | 32.18 ms | 22.75 ms | 1.41x |
-| 5 ms | 66.59 ms | 26.60 ms | 2.50x |
-| 20 ms | 157.55 ms | 40.95 ms | 3.85x |
+| 0 ms | 37.25 ms | 23.59 ms | 1.58x |
+| 5 ms | 71.93 ms | 27.14 ms | 2.65x |
+| 20 ms | 161.22 ms | 42.68 ms | 3.78x |
 
 Reading this:
 
@@ -57,10 +57,10 @@ Reading this:
   the expected shape: with six calls in flight and no shared bottleneck, the
   floor is one call's latency rather than six.
 - The speedup never reaches the ideal 6x. At 20 ms the concurrent batch takes
-  41.0 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
+  42.7 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
   (argument validation, the file-state record, output handling) still runs under
   the GIL, and the pool has its own start-up cost.
-- Even with **no injected latency** the concurrent path is 1.41x faster, so real
+- Even with **no injected latency** the concurrent path is 1.58x faster, so real
   file reads and MD5 digests do overlap. I did not profile further, so I cannot
   attribute that split between filesystem concurrency and `hashlib` releasing the
   GIL.
@@ -78,8 +78,8 @@ models.
 
 | Injected latency | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: |
-| 20 ms | 82.23 ms | 23.95 ms | 3.43x |
-| 100 ms | 402.64 ms | 103.90 ms | 3.88x |
+| 20 ms | 82.45 ms | 24.14 ms | 3.42x |
+| 100 ms | 402.54 ms | 104.00 ms | 3.87x |
 
 This is close to the ideal 4x, and closer than the read batch gets, because the
 stubbed subagent releases the GIL for the whole of its latency while a file read
@@ -99,35 +99,65 @@ and `run_end`, so about 82 events.
 
 | Trace | Median | Min | Max | Bytes written |
 | --- | ---: | ---: | ---: | ---: |
-| off | 90.22 ms | 88.47 ms | 106.26 ms | 0 |
-| on | 104.99 ms | 97.48 ms | 135.74 ms | 10,871 |
-| overhead | **+14.77 ms** | | | |
+| off | 103.44 ms | 92.09 ms | 160.08 ms | 0 |
+| on | 98.17 ms | 95.18 ms | 120.04 ms | 10,868 |
+| overhead | **-5.27 ms** | | | |
 
-That is roughly 0.18 ms and 133 bytes per event, or about 16% of a run whose only
-work is tool calls. The variance is high (max 135.74 ms against a 97.48 ms
-minimum) because the trace writes to disk on every event.
+**The overhead is now below this measurement's noise floor.** In this run the
+traced variant came out 5 ms *faster*, which is not a real effect: the spread
+between the fastest and slowest run of the same configuration (92 to 160 ms) is
+larger than the difference being measured. Earlier runs of the same experiment
+put the overhead at +9.2 ms, +13.2 ms and +14.8 ms. The honest summary is
+"somewhere between zero and about 15 ms for ~82 events, which is 0-15% of a run
+whose only work is tool calls" -- and that the measurement is not precise enough
+to say more without many more samples.
 
 ### This experiment found and fixed a real defect
 
 The first version of the trace opened the file, wrote one line, and closed it
-for **every** event. The same experiment measured:
+for **every** event. That was far above the noise:
 
 | Trace implementation | Overhead, 21 turns | Bytes |
 | --- | ---: | ---: |
 | reopen the file per event | +171.92 ms | 10,910 |
 | persistent handle, flushed per event (current) | +9.23 ms | 10,882 |
 
-Both of those figures come from the same `--repeats 5` run of the same
-experiment in this session; the recorded 7-repeat figure above is +14.77 ms. The
+Both of those come from the same `--repeats 5` run of the same experiment. The
 per-event `open`/`close` cost about 2 ms each on this platform, which is more
 than the event is worth, so `Trace` now opens the file once per run and flushes
 after each event. Flushing is kept so a crash still leaves everything already
 written on disk.
 
 This is the clearest argument for having run the experiment at all: the feature
-looked correct and its cost was only visible when measured.
+looked correct, and its cost was an order of magnitude above the noise floor
+once measured.
 
-## 4. Verification loop
+## 4. Retrievable memory
+
+A planted fact is loaded into a journal alongside *N* deterministic distractor
+messages, and `recall` is asked for the fact. Five different facts per size; a
+hit counts only when the planted text comes back.
+
+| Distractors | Archived messages | Top-1 | Top-3 | Search (median) |
+| ---: | ---: | ---: | ---: | ---: |
+| 50 | 55 | 5/5 | 5/5 | 0.51 ms |
+| 200 | 205 | 5/5 | 5/5 | 1.16 ms |
+| 800 | 805 | 5/5 | 5/5 | 3.87 ms |
+
+Reading this:
+
+- Ranking is exact at every size tested: the planted fact is first, not merely
+  present. The distractors share vocabulary with the queries (the filler includes
+  words like `deploy`, `retry` and `config`), so this is not a trivial separator.
+- Search cost grows linearly with the archive, because the scorer scans every
+  entry. At 805 entries that is under 4 ms, which is nothing next to a model
+  call; at hundreds of thousands of entries it would need an inverted index.
+  This is the main scaling limit of the current implementation.
+- Five facts per size is a small sample. It demonstrates that the ranking works,
+  not how well it generalises to real conversation text, where queries are
+  messier and the useful answer may share no rare token with them.
+
+## 5. Verification loop
 
 A scripted agent that reads a file, edits it, and then stops. `verify_required`
 is on by default; the nudge is bounded by `verify_nudges` (1 here).
@@ -157,7 +187,7 @@ not that it was a good one. A model could satisfy it with `echo`. That is a real
 limitation of a mechanical check, and it is why the result is reported as a
 `verified` flag rather than being treated as proof.
 
-## 5. Dispatch policy
+## 6. Dispatch policy
 
 Policy decisions for a representative set of calls, with
 `policy_deny_tools=('run_sandbox',)` and `policy_deny_patterns=('rm -rf*',)`.
@@ -197,6 +227,12 @@ In `read_only` mode the same rules deny `write_file`, `edit_file`, `run_bash`,
   byte-stable between runs.
 - **The 21-turn trace figure is small.** ~82 events is a short run; a long
   session writes proportionally more, and flush-per-event cost scales with it.
+  It is also small enough that its cost sits at the noise floor of this
+  measurement, so treat the trace overhead as "under ~15 ms for 82 events"
+  rather than as a precise number.
+- **Retrieval was measured on synthetic text.** Five planted facts per size,
+  against filler that shares vocabulary with the queries. Real conversation
+  queries are messier, and the useful message may share no rare token with them.
 
 ## Files
 
