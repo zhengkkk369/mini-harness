@@ -254,6 +254,61 @@ A stub I wrote myself agreed with my own assumptions. A real server did not:
 All three have regression tests, including one that kills a server mid-call and
 asserts the caller is released quickly.
 
+### A second server, and the write path
+
+The read path above was one server and mostly reads. A second pass bridged two
+real servers at once and exercised writing:
+
+| | |
+| --- | --- |
+| servers | `secure-filesystem-server` 0.2.0 (14 tools) and `memory-server` 0.6.3 (9 tools) |
+| bridged tools | 23, with no name collisions between the two |
+| failures | none |
+
+The filesystem write path, all through the bridge:
+
+| call | result |
+| --- | --- |
+| `fs__create_directory` | created |
+| `fs__write_file` | wrote `retries = 3` |
+| `fs__edit_file` | rewrote it to `retries = 5`, returning a diff |
+| `fs__move_file` | moved the file into place |
+| `fs__read_text_file` | read it back |
+
+Checked against the disk rather than against the server's own reply: the file
+exists, contains `retries = 5`, and the pre-move path is gone. The memory server
+was written to and then queried — `create_entities`, `create_relations`,
+`search_nodes` — and the entity came back with its relation, so state really does
+survive across calls to a second, independent server.
+
+`fs__write_file` also asked for approval, like any other risky tool.
+
+### Pagination is implemented, but no real server exercised it
+
+`list_tools` now follows `nextCursor` instead of taking the first page and
+silently reporting a subset, and it stops after 50 pages rather than trusting a
+server that never ends. That behaviour is covered offline against a stub with
+`--paginate=2` and `--paginate-loop`.
+
+**Neither real server pages its tool list** — both answered in one page — so this
+path is stub-verified only. It is implemented because the spec allows it, not
+because a server needed it.
+
+### A limitation worth knowing before choosing a server
+
+`MCPBridge` gives each server the same environment the agent's shell gets, and
+that environment has credential-shaped variables filtered out of it. A server
+that authenticates through `GITHUB_TOKEN`, `BRAVE_API_KEY` or anything matching
+`*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*_PWD` or `*AUTH*`
+therefore receives nothing.
+
+That filter exists to keep secrets out of a shell the model can drive, and a
+server the operator configured by hand is arguably a different trust context. For
+now the consequence is a documented limit rather than an oversight, with a test
+asserting it: a server needing a token has to read it from its own configuration
+file. There is also no per-server environment, so two servers cannot be given
+different values of one variable.
+
 ## 4. Harbor and SWE-bench Verified: one task, not solved
 
 The repository's documented benchmark path is Harbor against SWE-bench Verified.

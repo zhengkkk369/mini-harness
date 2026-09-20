@@ -35,6 +35,8 @@ from mini_harness.tool.box import ToolDefinition
 
 PROTOCOL_VERSION = '2024-11-05'
 CLIENT_INFO = {'name': 'mini-harness', 'version': '0.1.0'}
+# A server may page its tool list. This bounds a server that never stops.
+MAX_PAGES = 50
 NAME_SAFE = re.compile(r'[^A-Za-z0-9_-]')
 JSON_TYPES = {
     'string': str,
@@ -128,6 +130,7 @@ class MCPClient:
         self.cwd = cwd
         self.process = None
         self.closed = False
+        self.pages = 0
         self.notifications: list = []
         self.noise: list = []
         self._inbox: queue.Queue = queue.Queue()
@@ -284,9 +287,28 @@ class MCPClient:
     # ------------------------------------------------------------------ tools
 
     def list_tools(self) -> list:
-        result = self._request('tools/list', {})
-        tools = result.get('tools') if isinstance(result, dict) else None
-        return [tool for tool in (tools or []) if isinstance(tool, dict) and tool.get('name')]
+        """Every tool the server offers, following pagination cursors.
+
+        The spec lets a server answer with one page and a ``nextCursor``. A
+        client that ignores the cursor silently sees a subset of the tools, which
+        looks like a server that simply has fewer of them.
+        """
+        tools, cursor, pages = [], None, 0
+        while True:
+            result = self._request('tools/list', {'cursor': cursor} if cursor else {})
+            if not isinstance(result, dict):
+                break
+            tools.extend(tool for tool in (result.get('tools') or [])
+                         if isinstance(tool, dict) and tool.get('name'))
+            pages += 1
+            cursor = result.get('nextCursor')
+            if not cursor:
+                break
+            if pages >= MAX_PAGES:
+                self.noise.append(f'tools/list still had a cursor after {MAX_PAGES} pages')
+                break
+        self.pages = pages
+        return tools
 
     def call_tool(self, tool: str, arguments: dict) -> str:
         start = time.time()
@@ -349,6 +371,7 @@ class MCPBridge:
             self.definitions.extend(client.definition(tool, risky = self.cfg.mcp_risky)
                                     for tool in tools)
             TRACE.emit('mcp_server', server = name, tools = [t.get('name') for t in tools],
+                       pages = getattr(client, 'pages', 1),
                        server_info = getattr(client, 'server_info', None))
         return self
 

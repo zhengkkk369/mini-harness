@@ -7,6 +7,8 @@ with test_). Flags exist only to make failure modes reachable:
     --noisy           emit a non-JSON line, a notification, and a server request
     --silent          never answer anything
     --binary          emit a line containing bytes that are not valid UTF-8
+    --paginate=N      answer tools/list in pages of N
+    --paginate-loop   always return a nextCursor, however many pages are read
 """
 
 import json
@@ -88,6 +90,11 @@ def call_tool(request_id, name, arguments) -> None:
 
 def main() -> int:
     flags = set(sys.argv[1:])
+    page_size = None
+    for argument in sys.argv[1:]:
+        if argument.startswith('--paginate='):
+            page_size = int(argument.split('=', 1)[1])
+    endless_cursor = '--paginate-loop' in flags
     if '--binary' in flags:
         # A server may emit bytes that are not valid UTF-8; a text-mode pipe
         # decoded with the locale encoding would die on this.
@@ -127,7 +134,16 @@ def main() -> int:
         elif method == 'notifications/initialized':
             continue
         elif method == 'tools/list':
-            result(request_id, {'tools': TOOLS})
+            if endless_cursor:
+                result(request_id, {'tools': TOOLS[:1], 'nextCursor': 'always-more'})
+            elif page_size:
+                start = int((message.get('params') or {}).get('cursor') or 0)
+                payload = {'tools': TOOLS[start:start + page_size]}
+                if start + page_size < len(TOOLS):
+                    payload['nextCursor'] = str(start + page_size)
+                result(request_id, payload)
+            else:
+                result(request_id, {'tools': TOOLS})
         elif method == 'tools/call':
             params = message.get('params') or {}
             call_tool(request_id, params.get('name'), params.get('arguments') or {})

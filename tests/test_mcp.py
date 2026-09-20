@@ -145,6 +145,46 @@ def test_a_client_starts_and_lists_tools(cfg):
     assert [tool['name'] for tool in tools] == [
         'echo', 'add', 'optional', 'fail', 'slow', 'no schema']
     assert client.server_info == {'name': 'stub', 'version': '1'}
+    assert client.pages == 1
+
+
+def test_a_paginated_tool_list_is_assembled(cfg):
+    """Ignoring nextCursor would silently show a subset of the tools."""
+    with client_of(cfg, '--paginate=2') as client:
+        tools = client.list_tools()
+
+    assert [tool['name'] for tool in tools] == [
+        'echo', 'add', 'optional', 'fail', 'slow', 'no schema']
+    assert client.pages == 3
+
+
+def test_an_endless_cursor_is_bounded(cfg):
+    with client_of(cfg, '--paginate-loop') as client:
+        tools = client.list_tools()
+
+    assert len(tools) == mcp.MAX_PAGES
+    assert any('cursor' in note for note in client.noise)
+
+
+def test_the_bridge_registers_tools_from_every_page(bridge_of):
+    bridge = bridge_of(stub_spec('--paginate=2'))
+    assert len(bridge.definitions) == 6
+
+
+def test_the_trace_records_how_many_pages_were_read(cfg_factory, session_dir):
+    path = session_dir / 'trace.jsonl'
+    TRACE.configure(path)
+    try:
+        cfg = cfg_factory(mcp_servers=(stub_spec('--paginate=2'),))
+        with MCPBridge(cfg=cfg):
+            pass
+    finally:
+        TRACE.configure(None)
+
+    events = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+    server = next(event for event in events if event['event'] == 'mcp_server')
+    assert server['pages'] == 3
+    assert len(server['tools']) == 6
 
 
 def test_the_command_is_resolved_through_path(monkeypatch):
@@ -366,6 +406,21 @@ def test_closing_the_bridge_stops_the_servers(bridge_of):
 
     assert all(process.poll() is not None for process in processes)
     assert bridge.definitions == []
+
+
+def test_a_server_does_not_receive_the_agents_filtered_secrets(cfg_factory, monkeypatch):
+    """bash_env exists to keep secrets out of the agent's shell.
+
+    A server therefore cannot authenticate through a variable whose name looks
+    like a credential. That is a deliberate consequence, not an oversight, and
+    it is the reason a server needing a token must read it from its own config.
+    """
+    monkeypatch.setenv('SOME_SERVICE_TOKEN', 'leak-me')
+
+    cfg = cfg_factory()
+
+    assert 'SOME_SERVICE_TOKEN' not in cfg.bash_env
+    assert 'DEEPSEEK_API_KEY' not in cfg.bash_env
 
 
 # --------------------------------------------------------------------------- executor integration

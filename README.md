@@ -16,7 +16,7 @@
 
 - **Small, but complete.** About 2,700 lines of Python: ten tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 477 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 482 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the ten tools, context compaction, retrievable memory, MCP bridging,
   configuration, the sandbox command builder, and the TUI's worker protocol.
@@ -276,10 +276,24 @@ One unreachable server never stops a run: the failure is printed and traced as
 export MINI_HARNESS_MCP_TIMEOUT=10   # seconds, bounds the handshake and every call
 ```
 
-This was validated end to end against the real
-`@modelcontextprotocol/server-filesystem` (v0.2.0), which contributed 14 tools;
-a real model then used them to answer a question in four turns. That run is
-recorded in [MODEL_EVAL.md](MODEL_EVAL.md).
+This was validated end to end against two real servers: the
+`@modelcontextprotocol/server-filesystem` (v0.2.0, 14 tools) and the
+`@modelcontextprotocol/server-memory` (v0.6.3, nine tools). Between them they
+covered reading, creating, editing, moving, and state that survives across calls
+to a second server. That run is recorded in [MODEL_EVAL.md](MODEL_EVAL.md).
+
+A tool list longer than one page is followed through `nextCursor`, and a server
+that never stops paging is cut off rather than trusted. Neither of the two
+servers tested actually pages its list, so that path is only covered by tests.
+
+### What a server does not receive
+
+Each server gets the same environment as the agent's shell, and credential-shaped
+variables are filtered out of that. A server authenticating through
+`GITHUB_TOKEN`, `BRAVE_API_KEY` or anything matching `*KEY*`, `*TOKEN*`,
+`*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*_PWD` or `*AUTH*` receives nothing and
+has to read its own configuration instead. There is also no per-server
+environment, so two servers cannot be given different values of one variable.
 
 ### What MCP tools are not subject to
 
