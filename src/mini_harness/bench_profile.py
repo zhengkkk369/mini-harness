@@ -119,6 +119,9 @@ O1. run_todo is available for multi-step work. Use it when a plan helps you. You
 O2. run_subagent is available (explore_agent, coding_agent, planning_agent). Use it
     when a subtask is genuinely separable. A subagent spends its own turns and
     returns only a summary.
+
+O3. recall is available. Once earlier turns have been compacted into a summary,
+    recall(query) searches the removed text for a detail the summary dropped.
 '''
 
 BENCH_OVERRIDE: dict = {

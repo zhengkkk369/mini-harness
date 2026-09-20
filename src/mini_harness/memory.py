@@ -1,0 +1,158 @@
+"""Search what compaction removed.
+
+Compaction is lossy: the summariser replaces a prefix of the conversation with
+a few sentences. Until now the removed messages were only written to
+``mini_harness_history.jsonl`` as an audit trail and never read again, so any
+detail the summary dropped was gone for the rest of the run.
+
+This module turns that journal into something queryable. Retrieval is plain
+lexical scoring -- token overlap weighted by inverse document frequency -- so it
+needs no model, no embeddings and no extra dependency, and the same query always
+returns the same answer.
+
+The journal format is unchanged and stays compatible with what
+``bench/atif.py`` reads back.
+"""
+
+import json
+import math
+import re
+
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+from mini_harness.config import CONFIG
+
+JOURNAL_NAME = 'mini_harness_history.jsonl'
+TOKEN = re.compile(r'[A-Za-z0-9_]+')
+
+def journal_for(session_path: str|Path|None, cfg = CONFIG) -> Path:
+    """The journal belonging to a session file, or to the default one.
+
+    Both the writer (compaction) and the reader (the recall tool) go through
+    this, so they cannot disagree about the file name.
+    """
+    if session_path:
+        base = Path(session_path)
+    elif cfg.session_path:
+        base = Path(cfg.session_path)
+    else:
+        base = cfg.work_space/'session.json'
+    return base.with_name(JOURNAL_NAME)
+
+def journal_path(cfg = CONFIG) -> Path:
+    """Where the compaction journal lives for a run using this config."""
+    return journal_for(cfg.session_path, cfg)
+
+def _tokens(text: str) -> list:
+    return TOKEN.findall(text.lower())
+
+def _message_text(message: dict) -> tuple:
+    """(role, searchable text) for one archived message."""
+    role = str(message.get('role', '?'))
+    parts = []
+    content = message.get('content')
+    if content:
+        parts.append(str(content))
+    for call in message.get('tool_calls') or []:
+        function = call.get('function') or {}
+        parts.append(f"{function.get('name', '?')} {function.get('arguments', '')}")
+    return role, '\n'.join(parts)
+
+@dataclass(frozen = True)
+class MemoryEntry:
+    index: int
+    ts: float
+    role: str
+    text: str
+    tokens: tuple
+
+@dataclass(frozen = True)
+class MemoryHit:
+    score: float
+    role: str
+    ts: float
+    index: int
+    text: str
+
+class Memory:
+    """A read-only view over a compaction journal, re-read when the file grows."""
+
+    def __init__(self, path: str|Path) -> None:
+        self.path = Path(path)
+        self._stamp = None
+        self._entries: list = []
+        return
+
+    def entries(self) -> list:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            self._stamp, self._entries = None, []
+            return []
+        stamp = (stat.st_mtime, stat.st_size)
+        if stamp == self._stamp:
+            return list(self._entries)
+        self._entries = self._read()
+        self._stamp = stamp
+        return list(self._entries)
+
+    def _read(self) -> list:
+        entries = []
+        try:
+            raw = self.path.read_text(errors = 'replace', encoding = 'utf-8')
+        except OSError:
+            return entries
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            removed = record.get('removed') if isinstance(record, dict) else None
+            if not isinstance(removed, list):
+                continue
+            ts = record.get('ts') or 0.0
+            for message in removed:
+                if not isinstance(message, dict):
+                    continue
+                role, text = _message_text(message)
+                if not text.strip():
+                    continue
+                entries.append(MemoryEntry(len(entries), ts, role, text, tuple(_tokens(text))))
+        return entries
+
+    def search(self, query: str, limit: int = 5, role: str|None = None) -> list:
+        """Best matches first, ties broken by the order they were archived."""
+        entries = self.entries()
+        terms = set(_tokens(query))
+        if not entries or not terms:
+            return []
+        total = len(entries)
+        document_frequency = {term: sum(1 for e in entries if term in e.tokens) for term in terms}
+        scored = []
+        for entry in entries:
+            if role and entry.role != role:
+                continue
+            counts = Counter(entry.tokens)
+            score = 0.0
+            for term in terms:
+                frequency = counts.get(term, 0)
+                if not frequency or not document_frequency[term]:
+                    continue
+                score += (1 + math.log(frequency)) * math.log(1 + total / document_frequency[term])
+            if score > 0:
+                scored.append((score, entry))
+        scored.sort(key = lambda pair: (-pair[0], pair[1].index))
+        return [MemoryHit(score, entry.role, entry.ts, entry.index, entry.text)
+                for score, entry in scored[:max(0, limit)]]
+
+    def stats(self) -> dict:
+        entries = self.entries()
+        return {
+            'entries': len(entries),
+            'bytes': self.path.stat().st_size if self.path.exists() else 0,
+            'roles': dict(Counter(entry.role for entry in entries)),
+        }

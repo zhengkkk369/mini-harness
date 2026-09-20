@@ -5,6 +5,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.memory import journal_for
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 
@@ -65,9 +66,13 @@ Please summarize those conversation history into a working summary report, follo
         return response.choices[0].message.content
 
     def _compact_text(self, cut: int, response: str, message: list, cfg = CONFIG) -> list:
+        note = ''
+        if cfg.recall_enabled:
+            note = ('\n\n[The turns above were compacted to save context. Their full text is '
+                    'searchable: call recall(query) to look something up in them.]')
         return [
             message[0],
-            {'role': 'assistant', 'content': f'Here is the summary of the history conversation: {response}', 'reasoning_content': ''},
+            {'role': 'assistant', 'content': f'Here is the summary of the history conversation: {response}{note}', 'reasoning_content': ''},
             *message[cut:]
         ]
 
@@ -83,7 +88,7 @@ Please summarize those conversation history into a working summary report, follo
             response = retry_call(lambda: self._request_agent(client, user_prompt, cfg = cfg), cfg = cfg)
             if session_path is not None:
                 try:
-                    hist = Path(session_path).with_name('mini_harness_history.jsonl')
+                    hist = journal_for(session_path, cfg = cfg)
                     with open(hist, 'a', encoding = 'utf-8') as f:
                         f.write(json.dumps({'ts': time.time(), 'removed': old}, ensure_ascii=False) + '\n')
                 except Exception as e:

@@ -110,6 +110,12 @@ class Config:
     verify_required: bool = True
     verify_nudges: int = 1
 
+    # Retrievable memory. Compaction is lossy, so what it removes stays
+    # searchable through the recall tool.
+    recall_enabled: bool = True
+    recall_limit: int = 5
+    recall_snippet: int = 400
+
     max_retry: int = 5
     retry_base: float = 2.0
     rate_retry: int = 6
@@ -247,6 +253,11 @@ O1. run_todo: use it for any task with more than two steps, and keep it updated 
 O2. run_subagent (explore_agent, coding_agent, planning_agent): use it when a subtask
     is genuinely separable. A subagent spends its own turns and returns only a
     summary, so it is not free.
+
+O3. recall: once context compaction has replaced earlier turns with a summary, use
+    recall(query) to search the removed text instead of guessing or re-reading
+    files. It is the only way back to a detail the summary dropped, such as an
+    exact path, value, command or error message.
     """
 
     @property
@@ -363,13 +374,15 @@ def build_config() -> Config:
             overrides[name] = float(value)
     if trace := os.environ.get('MINI_HARNESS_TRACE'):
         overrides['trace_path'] = trace
-    for name in ('max_parallel_tools', 'verify_nudges'):
+    for name in ('max_parallel_tools', 'verify_nudges', 'recall_limit', 'recall_snippet'):
         if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
             if int(value) <= 0:
                 raise ValueError(f'{name} must be positive')
             overrides[name] = int(value)
-    for name in ('parallel_tools', 'read_only', 'verify_required'):
-        variable = f'MINI_HARNESS_{name.upper()}'
+    for variable, name in (('MINI_HARNESS_PARALLEL_TOOLS', 'parallel_tools'),
+                           ('MINI_HARNESS_READ_ONLY', 'read_only'),
+                           ('MINI_HARNESS_VERIFY_REQUIRED', 'verify_required'),
+                           ('MINI_HARNESS_RECALL', 'recall_enabled')):
         if value := os.environ.get(variable):
             overrides[name] = env_flag(value, variable)
     for field_name, variable in (('policy_deny_tools', 'MINI_HARNESS_DENY_TOOLS'),

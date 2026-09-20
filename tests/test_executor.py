@@ -388,11 +388,11 @@ def test_thrash_notice_fires_at_the_configured_count(cfg_factory, workspace):
 # --------------------------------------------------------------------- registry wiring
 
 
-def test_default_registry_exposes_nine_tools():
-    assert len(box.TOOLS) == 9
+def test_default_registry_exposes_every_built_in_tool():
+    assert len(box.TOOLS) == 10
     assert {t.name for t in box.TOOLS} == {
         "glob_file", "grep_file", "read_file", "write_file", "edit_file",
-        "run_bash", "run_sandbox", "run_todo", "run_subagent",
+        "run_bash", "run_sandbox", "run_todo", "recall", "run_subagent",
     }
 
 
@@ -402,7 +402,7 @@ def test_only_shell_and_subagent_tools_are_risky():
 
 def test_tool_schemas_are_exportable_json():
     api_tools = box._to_api_tool(box.TOOLS)
-    assert len(api_tools) == 9
+    assert len(api_tools) == 10
     for entry in api_tools:
         assert entry["type"] == "function"
         assert entry["function"]["parameters"]["type"] == "object"

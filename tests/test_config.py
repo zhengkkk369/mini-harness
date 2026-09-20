@@ -23,6 +23,7 @@ def isolated_env(monkeypatch):
         "MINI_HARNESS_PARALLEL_TOOLS", "MINI_HARNESS_MAX_PARALLEL_TOOLS", "MINI_HARNESS_READ_ONLY",
         "MINI_HARNESS_VERIFY_REQUIRED", "MINI_HARNESS_VERIFY_NUDGES",
         "MINI_HARNESS_DENY_TOOLS", "MINI_HARNESS_DENY_PATTERNS",
+        "MINI_HARNESS_RECALL", "MINI_HARNESS_RECALL_LIMIT", "MINI_HARNESS_RECALL_SNIPPET",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -142,6 +143,9 @@ def test_execution_defaults():
     assert cfg.read_only is False
     assert cfg.verify_required is True
     assert cfg.verify_nudges == 1
+    assert cfg.recall_enabled is True
+    assert cfg.recall_limit == 5
+    assert cfg.recall_snippet == 400
     assert cfg.policy_deny_tools == ()
     assert cfg.policy_deny_patterns == ()
 
@@ -150,6 +154,7 @@ def test_execution_defaults():
     ("MINI_HARNESS_PARALLEL_TOOLS", "parallel_tools"),
     ("MINI_HARNESS_READ_ONLY", "read_only"),
     ("MINI_HARNESS_VERIFY_REQUIRED", "verify_required"),
+    ("MINI_HARNESS_RECALL", "recall_enabled"),
 ])
 def test_boolean_switches_are_read_from_the_environment(monkeypatch, variable, field):
     monkeypatch.setenv(variable, "true")
@@ -168,6 +173,8 @@ def test_a_garbage_boolean_is_rejected(monkeypatch):
 @pytest.mark.parametrize("variable,field", [
     ("MINI_HARNESS_MAX_PARALLEL_TOOLS", "max_parallel_tools"),
     ("MINI_HARNESS_VERIFY_NUDGES", "verify_nudges"),
+    ("MINI_HARNESS_RECALL_LIMIT", "recall_limit"),
+    ("MINI_HARNESS_RECALL_SNIPPET", "recall_snippet"),
 ])
 def test_count_switches_are_read_from_the_environment(monkeypatch, variable, field):
     monkeypatch.setenv(variable, "3")
@@ -176,6 +183,7 @@ def test_count_switches_are_read_from_the_environment(monkeypatch, variable, fie
 
 @pytest.mark.parametrize("variable", [
     "MINI_HARNESS_MAX_PARALLEL_TOOLS", "MINI_HARNESS_VERIFY_NUDGES",
+    "MINI_HARNESS_RECALL_LIMIT", "MINI_HARNESS_RECALL_SNIPPET",
 ])
 def test_non_positive_counts_are_rejected(monkeypatch, variable):
     monkeypatch.setenv(variable, "0")

@@ -14,11 +14,11 @@
 
 ## Why mini-harness?
 
-- **Small, but complete.** About 1,700 lines of Python: nine tools, context
+- **Small, but complete.** About 2,300 lines of Python: ten tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 338 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 375 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
-  gates, the nine tools, context compaction, configuration and the sandbox
+  gates, the ten tools, context compaction, configuration and the sandbox
   command builder.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
@@ -203,6 +203,38 @@ export MINI_HARNESS_VERIFY_NUDGES=2        # how many times to ask
 the command tested the change, and it is reported as a flag rather than treated
 as proof.
 
+## Retrievable memory
+
+Compaction is lossy by design: when the conversation passes `compact_limit`, a
+sub-model replaces the oldest turns with a summary. The removed messages were
+always written to `mini_harness_history.jsonl`, but only as an audit trail —
+nothing read them back, so a detail the summary dropped was gone for the rest of
+the run.
+
+`recall(query)` closes that loop. It scores the archived messages against the
+query and returns the best matches, so the agent can get back to an exact path,
+value, command or error message instead of guessing or re-reading files:
+
+```
+[recall]: 3 of 412 archived messages match 'deploy window'
+
+--- user (score 2.41, archived 04:52:11) ---
+the deploy window is 02:00-04:00 UTC on weekdays
+```
+
+Retrieval is lexical — token overlap weighted by inverse document frequency — so
+it needs no model, no embedding and no new dependency, and the same query always
+gives the same answer. The injected compaction summary tells the agent the
+archive exists and how to search it. The journal format is unchanged and stays
+readable by [`bench/atif.py`](bench/atif.py), which reconstructs compaction
+boundaries from it.
+
+```sh
+export MINI_HARNESS_RECALL=false        # no recall tool at all
+export MINI_HARNESS_RECALL_LIMIT=10     # matches per query, default 5
+export MINI_HARNESS_RECALL_SNIPPET=800  # characters per match, default 400
+```
+
 ## Get started
 
 ### 1. Download and install
@@ -283,6 +315,7 @@ uv run --locked pytest
 | `tests/test_contract.py` | the tool-definition and registry contracts |
 | `tests/test_parallel.py` | batch overlap (proved with a barrier, not a stopwatch) and eligibility |
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
+| `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
 
 For measurements rather than pass/fail, see [EXPERIMENTS.md](EXPERIMENTS.md) and
 `uv run python -m bench.experiments`.

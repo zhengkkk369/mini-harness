@@ -525,8 +525,49 @@ def test_tool_schemas_match_the_registry(cfg):
     assert [t["function"]["name"] for t in agent.tools] == [t.name for t in TOOLS]
 
 
-# --------------------------------------------------------------------------- verification
+# --------------------------------------------------------------------------- retrievable memory
 
+
+def test_a_compacted_run_can_recall_what_compaction_removed(cfg_factory, workspace, session_dir):
+    """The end-to-end loop: compact, lose the detail, then search it back."""
+    cfg = cfg_factory(compact_limit=10, recent_keep=2)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 100, 5)),
+        Stream(completion(model_message("", [call("recall", query="PLUMBUS")]), 100, 5)),
+        Stream(completion(model_message("done"), 100, 5)),
+    )
+    agent.message.append({"role": "user", "content": "the code word is PLUMBUS, remember it"})
+
+    result = agent._run_turn(client, executor(cfg), cfg=cfg)
+
+    assert result.outcome == OUTCOME.COMPLETED
+    journal = session_dir / "mini_harness_history.jsonl"
+    assert journal.exists()
+    assert "PLUMBUS" in journal.read_text(encoding="utf-8")
+    # the live context no longer carries it; only the tool result does
+    assert "PLUMBUS" not in str(agent.message[1])
+    assert any("PLUMBUS" in m["content"] for m in agent.message if m["role"] == "tool")
+
+
+def test_the_compaction_summary_points_at_recall(cfg_factory, workspace):
+    cfg = cfg_factory(compact_limit=10, recent_keep=2)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 100, 5)),
+        Stream(completion(model_message("done"), 100, 5)),
+    )
+    agent.message.append({"role": "user", "content": "remember the code word PLUMBUS"})
+
+    agent._run_turn(client, executor(cfg), cfg=cfg)
+
+    summary = [m for m in agent.message if m["role"] == "assistant" and m.get("content")]
+    assert any("call recall(query)" in str(m["content"]) for m in summary)
+
+
+# --------------------------------------------------------------------------- verification
 
 def test_an_unverified_edit_costs_one_extra_turn(cfg_factory, workspace):
     cfg = cfg_factory(verify_required=True, verify_nudges=1)

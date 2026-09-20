@@ -20,6 +20,7 @@ from enum import Enum
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.memory import Memory, journal_path
 from mini_harness.policy import Policy, DENY
 from mini_harness.trace import TRACE
 from mini_harness.tool.path import validate_read, validate_write, is_denied, _resolve_file
@@ -38,7 +39,7 @@ WRITE_TOOLS = {'write_file', 'edit_file'}
 PATH_KEYED_TOOLS = WRITE_TOOLS | {'read_file'}
 # Tools with no side effects, and therefore safe to overlap. run_todo is
 # excluded because it mutates shared state.
-SIDE_EFFECT_FREE_TOOLS = {'read_file', 'grep_file', 'glob_file'}
+SIDE_EFFECT_FREE_TOOLS = {'read_file', 'grep_file', 'glob_file', 'recall'}
 # Risky tools that are still worth overlapping: subagents are independent by
 # construction and spend their time blocked on their own model calls.
 PARALLEL_RISKY_TOOLS = {'run_subagent'}
@@ -582,6 +583,37 @@ def edit_file(inp: EditFileInput, cfg = CONFIG) -> str:
     return head + '\n' + body
 
 
+class RecallInput(BaseModel):
+    model_config = ConfigDict(extra = 'forbid')
+    query: Nonblank = Field(description = 'words to look for in the part of this conversation that compaction removed')
+    limit: int = Field(5, ge = 1, le = 20, description = 'how many matches to return')
+    role: str|None = Field(None, description = "restrict matches to one role: 'user', 'assistant' or 'tool'")
+
+def recall(inp: RecallInput, cfg = CONFIG) -> str:
+    if not cfg.recall_enabled:
+        return '[recall]: disabled by configuration'
+    start = time.time()
+    memory = Memory(journal_path(cfg))
+    stats = memory.stats()
+    hits = memory.search(inp.query, inp.limit, inp.role)
+    TRACE.emit('recall', query = inp.query, hits = len(hits), entries = stats['entries'],
+               seconds = round(time.time() - start, 4))
+
+    if not stats['entries']:
+        return '[recall]: nothing has been compacted yet, the whole conversation is still in context'
+    if not hits:
+        return (f'[recall]: no match for {inp.query!r} among {stats["entries"]} archived messages. '
+                'Try fewer or different words.')
+
+    lines = [f'[recall]: {len(hits)} of {stats["entries"]} archived messages match {inp.query!r}']
+    for hit in hits:
+        text = ' '.join(hit.text.split())
+        if len(text) > cfg.recall_snippet:
+            text = f'{text[:cfg.recall_snippet]}... [{len(text) - cfg.recall_snippet} more chars]'
+        when = time.strftime('%H:%M:%S', time.localtime(hit.ts)) if hit.ts else 'unknown time'
+        lines.append(f'\n--- {hit.role} (score {hit.score:.2f}, archived {when}) ---\n{text}')
+    return '\n'.join(lines)
+
 class RunBashInput(BaseModel):
     model_config = ConfigDict(extra = 'forbid')
     command: Nonblank = Field(description = 'the command used to operate the terminal')
@@ -893,6 +925,7 @@ TOOLS = [
     ToolDefinition('run_bash', 'operate the terminal by using the command', RunBashInput, run_bash, True),
     ToolDefinition('run_sandbox', 'Run code in a disposable Docker Python 3.12 container with no network and resource limits. Only sandbox/ is shared, as /workspace; writes there persist. Requires Docker and a locally pulled python:3.12-slim image. Prefer this for running generated code; run_bash executes on the host.', RunSandboxInput, run_sandbox, True),
     ToolDefinition('run_todo', 'build and update the todo list', RunTodoInput, run_todo, False),
+    ToolDefinition('recall', 'Search the earlier part of this conversation that context compaction removed and replaced with a summary. Use it when you need a detail the summary no longer carries, such as an exact value, path, command or error message from earlier.', RecallInput, recall, False),
     ToolDefinition('run_subagent', 'build and run the subagent to finish the task', RunSubAgentInput, run_subagent, True)
 ]
 

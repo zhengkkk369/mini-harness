@@ -219,8 +219,41 @@ def test_compaction_reports_and_survives_an_unwritable_history(cfg_factory, sess
     assert "the summary" in result[1]["content"]
 
 
-# --------------------------------------------------------------------------- trace
+# --------------------------------------------------------------------------- retrievable memory
 
+
+def test_the_summary_says_the_archive_is_searchable(cfg_factory, session_dir):
+    cfg = cfg_factory(recent_keep=5)
+
+    result = COMPACT.compact_content(FakeClient(summary='the summary'),
+                                     conversation(user_turns=6, tool_runs=3),
+                                     session_dir / 'session.json', cfg=cfg)
+
+    assert 'call recall(query)' in result[1]['content']
+
+
+def test_the_recall_note_is_left_out_when_recall_is_off(cfg_factory, session_dir):
+    cfg = cfg_factory(recent_keep=5, recall_enabled=False)
+
+    result = COMPACT.compact_content(FakeClient(summary='the summary'),
+                                     conversation(user_turns=6, tool_runs=3),
+                                     session_dir / 'session.json', cfg=cfg)
+
+    assert 'recall' not in result[1]['content']
+
+
+def test_the_summary_keeps_the_prefix_the_trajectory_builder_looks_for(cfg_factory, session_dir):
+    """bench/atif.py finds compaction boundaries with startswith(this prefix)."""
+    prefix = 'Here is the summary of the history conversation:'
+    assert f'"{prefix}"' in Path('bench/atif.py').read_text(encoding='utf-8')
+
+    result = COMPACT.compact_content(FakeClient(), conversation(user_turns=6, tool_runs=3),
+                                     session_dir / 'session.json', cfg=cfg_factory(recent_keep=5))
+
+    assert result[1]['content'].startswith(prefix)
+
+
+# --------------------------------------------------------------------------- trace
 
 def compact_events(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
