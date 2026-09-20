@@ -14,12 +14,12 @@
 
 ## Why mini-harness?
 
-- **Small, but complete.** About 2,300 lines of Python: ten tools, context
+- **Small, but complete.** About 2,700 lines of Python: ten tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 433 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 462 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the ten tools, context compaction, retrievable memory, MCP bridging,
-  configuration and the sandbox command builder.
+  configuration, the sandbox command builder, and the TUI's worker protocol.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
   The definition contract is enforced in code, not just written in the prompt,
@@ -385,6 +385,8 @@ uv run --locked pytest
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
+| `tests/test_history.py` | repairing a stored conversation so the API accepts it |
+| `tests/test_tui.py` | the TUI worker protocol, driven as a real subprocess in demo mode |
 
 For measurements rather than pass/fail, see [EXPERIMENTS.md](EXPERIMENTS.md) and
 `uv run python -m bench.experiments`.

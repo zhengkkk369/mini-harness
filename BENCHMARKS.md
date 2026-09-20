@@ -70,3 +70,31 @@ leaderboard submission. This source-only repository includes the agent and its
 unattended profile; the external Harbor adapter, job definitions, and raw
 benchmark archives are not bundled, so the historical evaluations are not yet
 reproducible from this checkout alone.
+
+### Re-running today's source against these numbers
+
+The recorded scores predate several mechanisms now in the default local profile.
+Small-task behaviour that helps interactively would move a benchmark number
+without the agent having changed, so the bench profile pins them to the
+configuration the scores were produced under:
+
+| Setting | Bench value | What it would otherwise cost |
+| --- | --- | --- |
+| `verify_required` | `False` | an unverified edit would earn an extra turn |
+| `parallel_tools` | `False` | read batches would overlap instead of running in order |
+| `recall_enabled` | `False` | a tenth tool and an extra prompt line |
+
+Everything else keeps its default, and a run that wants the new behaviour can
+turn it back on through the environment. `tests/test_config.py` asserts both the
+pinned values and that the bench prompt does not describe a tool the profile
+disables.
+
+Two differences cannot be pinned away, because they are in the source itself:
+
+- **The tool set.** The recorded revision had nine tools; this one has ten, and
+  `run_sandbox` is among the additions.
+- **The prompt.** It has grown with the mechanisms that remain documented.
+
+So a re-run today is comparable in *behaviour policy*, not identical in
+*capability*. Any new score should say which source revision produced it, as the
+existing scores do.

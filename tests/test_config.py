@@ -427,3 +427,28 @@ def test_bench_session_path_is_writable_on_this_host(monkeypatch, cfg_factory):
 
 def test_bench_prompt_forbids_asking_questions():
     assert "unattended" in BENCH_OVERRIDE["system_prompt"]
+
+
+def test_the_bench_profile_pins_the_new_mechanisms():
+    """A re-run should measure the agent, not a changed default."""
+    assert BENCH_OVERRIDE["verify_required"] is False
+    assert BENCH_OVERRIDE["parallel_tools"] is False
+    assert BENCH_OVERRIDE["recall_enabled"] is False
+
+
+def test_the_pinned_switches_reach_the_config(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_PROFILE", "bench")
+
+    cfg = build_config()
+
+    assert cfg.verify_required is False
+    assert cfg.parallel_tools is False
+    assert cfg.recall_enabled is False
+    # anything not pinned keeps its default
+    assert cfg.track_files is True
+    assert cfg.max_turns_main == 300
+
+
+def test_the_bench_prompt_does_not_describe_a_disabled_tool():
+    """The prompt and the pinned config must agree about what exists."""
+    assert "recall" not in BENCH_OVERRIDE["system_prompt"]

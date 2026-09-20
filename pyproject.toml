@@ -22,7 +22,9 @@ Repository = "https://github.com/mini-harness/mini-harness"
 mini-harness = "mini_harness.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.6"]
+# textual is not a runtime dependency: tui.py declares its own inline script
+# dependencies. It is here so the TUI tests can run in CI.
+dev = ["pytest>=8.3", "ruff>=0.6", "textual>=8.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mini_harness"]

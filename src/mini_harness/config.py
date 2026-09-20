@@ -194,7 +194,8 @@ E5. Paths are relative to the workspace root.
       - Writing is limited to ./sandbox. Write to "sandbox/xxx.py", not "xxx.py".
     The tools enforce these, not you. A PermissionError means you stepped outside.
 
-E6. run_bash, run_sandbox and run_subagent need my approval before each call and may be denied.
+E6. Tools that can change things need my approval before each call and may be denied:
+    run_bash, run_sandbox, run_subagent, and anything bridged in from an MCP server.
     If denied, do not retry the same call. Say what you needed it for and propose an
     alternative.
 

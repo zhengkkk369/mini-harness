@@ -119,11 +119,19 @@ O1. run_todo is available for multi-step work. Use it when a plan helps you. You
 O2. run_subagent is available (explore_agent, coding_agent, planning_agent). Use it
     when a subtask is genuinely separable. A subagent spends its own turns and
     returns only a summary.
-
-O3. recall is available. Once earlier turns have been compacted into a summary,
-    recall(query) searches the removed text for a detail the summary dropped.
 '''
 
+# The switches below are pinned to the behaviour the recorded scores were
+# produced with, so a re-run measures the agent rather than a new default. Each
+# one would otherwise add turns or reorder work:
+#
+#   verify_required  an unverified edit would cost an extra turn
+#   parallel_tools   read batches would overlap instead of running in order
+#   recall_enabled   the run would carry a tenth tool and an extra prompt line
+#
+# They stay available; a run that wants them can set them through the
+# environment. Anything not listed here keeps its default, and the tool set
+# itself cannot be pinned: this source has tools the recorded revision did not.
 BENCH_OVERRIDE: dict = {
     'profile': 'bench',
     'max_turns_main': 300,
@@ -136,5 +144,8 @@ BENCH_OVERRIDE: dict = {
     'deny_name': (),
     'deny_dir': frozenset(),
     'bash_env_deny': ('DEEPSEEK_API_KEY',),
+    'verify_required': False,
+    'parallel_tools': False,
+    'recall_enabled': False,
     'system_prompt': BENCH_PROMPT
 }

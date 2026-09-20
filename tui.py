@@ -34,31 +34,19 @@ ROOT = Path(__file__).resolve().parent
 STORE = ROOT / ".local" / "tui-sessions"
 LOGO = "  ╭╴ ╶╮\n  │ ─ │\n  ╰╴ ╶╯\n       "
 
+# The script runs with its own inline dependencies, so the package is not
+# installed; take it from the source tree, the way the worker already does.
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+
+from mini_harness.history import paired_history  # noqa: E402
+
 
 def atomic_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
-
-
-def paired_history(messages: list[dict]) -> list[dict]:
-    repaired, pending = [], {}
-    for message in messages:
-        if message.get("role") != "tool" and pending:
-            repaired.extend({"role": "tool", "tool_call_id": key, "content":
-                             "[interrupted] No result received. Check current files before retrying."}
-                            for key in pending)
-            pending = {}
-        repaired.append(message)
-        if message.get("role") == "assistant":
-            pending = {call["id"]: True for call in message.get("tool_calls", [])}
-        elif message.get("role") == "tool":
-            pending.pop(message.get("tool_call_id"), None)
-    repaired.extend({"role": "tool", "tool_call_id": key, "content":
-                     "[interrupted] No result received. Check current files before retrying."}
-                    for key in pending)
-    return repaired
 
 
 def agent_worker() -> None:
