@@ -8,7 +8,7 @@ import pytest
 from mini_harness.bench_profile import (
     BENCH_OVERRIDE, SESSION_NAME, TRACE_NAME, _log_dir, session_path, trace_path,
 )
-from mini_harness.config import Config, build_config
+from mini_harness.config import Config, build_config, normalize_no_proxy
 
 
 @pytest.fixture(autouse=True)
@@ -196,6 +196,29 @@ def test_deny_lists_are_split_on_commas(monkeypatch):
 def test_a_blank_deny_list_leaves_the_default(monkeypatch):
     monkeypatch.setenv("MINI_HARNESS_DENY_TOOLS", " , ")
     assert build_config().policy_deny_tools == ()
+
+
+# --------------------------------------------------------------------------- no_proxy
+
+
+def test_bracketed_ipv6_in_no_proxy_is_normalised(monkeypatch):
+    """httpx cannot parse "[::1]" and fails while building any client."""
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,[::1]")
+
+    assert normalize_no_proxy() == "localhost,127.0.0.1,::1,::1"
+    assert os.environ["NO_PROXY"] == "localhost,127.0.0.1,::1,::1"
+
+
+def test_a_plain_no_proxy_is_left_alone(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+
+    assert normalize_no_proxy() == "localhost,127.0.0.1"
+    assert os.environ["NO_PROXY"] == "localhost,127.0.0.1"
+
+
+def test_a_missing_no_proxy_is_not_an_error(monkeypatch):
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    assert normalize_no_proxy() is None
 
 
 # --------------------------------------------------------------------------- budgets

@@ -1,0 +1,422 @@
+[
+  {
+    "task": "fix_syntax",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='6'",
+    "outcome": "completed",
+    "turns": 5,
+    "calls": 4,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 18056,
+    "completion_tokens": 451,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 8.6
+  },
+  {
+    "task": "implement_median",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 8,
+    "calls": 9,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 36105,
+    "completion_tokens": 1622,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 12.1
+  },
+  {
+    "task": "preserve_order",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 9,
+    "calls": 9,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 40417,
+    "completion_tokens": 1384,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 11.5
+  },
+  {
+    "task": "two_file_constant",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='ok' labels='alpha beta'",
+    "outcome": "completed",
+    "turns": 5,
+    "calls": 7,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 19254,
+    "completion_tokens": 606,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 6.2
+  },
+  {
+    "task": "add_validation",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 11,
+    "calls": 11,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 71800,
+    "completion_tokens": 4464,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 3,
+    "seconds": 28.2
+  },
+  {
+    "task": "fix_import",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='helped'",
+    "outcome": "completed",
+    "turns": 5,
+    "calls": 5,
+    "errors_by_tag": {},
+    "prompt_tokens": 18497,
+    "completion_tokens": 635,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 6.1
+  },
+  {
+    "task": "read_and_report",
+    "config": "baseline",
+    "passed": true,
+    "detail": "answer='The deploy window is 02:00-04:00 UTC on weekdays.'",
+    "outcome": "completed",
+    "turns": 2,
+    "calls": 1,
+    "errors_by_tag": {},
+    "prompt_tokens": 6785,
+    "completion_tokens": 74,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 0,
+    "seconds": 2.2
+  },
+  {
+    "task": "fix_two_bugs",
+    "config": "baseline",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 7,
+    "calls": 7,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 29254,
+    "completion_tokens": 1418,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 13.0
+  },
+  {
+    "task": "fix_syntax",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='6'",
+    "outcome": "completed",
+    "turns": 5,
+    "calls": 4,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 18077,
+    "completion_tokens": 370,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 5.9
+  },
+  {
+    "task": "implement_median",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 10,
+    "calls": 10,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 46306,
+    "completion_tokens": 1931,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 18.2
+  },
+  {
+    "task": "preserve_order",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 7,
+    "calls": 7,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 28011,
+    "completion_tokens": 1335,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 11.4
+  },
+  {
+    "task": "two_file_constant",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='ok' labels='alpha beta'",
+    "outcome": "completed",
+    "turns": 5,
+    "calls": 8,
+    "errors_by_tag": {},
+    "prompt_tokens": 19139,
+    "completion_tokens": 544,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 8.6
+  },
+  {
+    "task": "add_validation",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 10,
+    "calls": 10,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 62314,
+    "completion_tokens": 4014,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 23.5
+  },
+  {
+    "task": "fix_import",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='helped'",
+    "outcome": "completed",
+    "turns": 6,
+    "calls": 6,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 23486,
+    "completion_tokens": 1014,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 9.5
+  },
+  {
+    "task": "read_and_report",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "answer='The deploy window is 02:00-04:00 UTC on weekdays.'",
+    "outcome": "completed",
+    "turns": 2,
+    "calls": 1,
+    "errors_by_tag": {},
+    "prompt_tokens": 6805,
+    "completion_tokens": 88,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 0,
+    "seconds": 1.2
+  },
+  {
+    "task": "fix_two_bugs",
+    "config": "no_verify",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 7,
+    "calls": 8,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 28764,
+    "completion_tokens": 1135,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 10.0
+  },
+  {
+    "task": "fix_syntax",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='6'",
+    "outcome": "completed",
+    "turns": 6,
+    "calls": 5,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 22462,
+    "completion_tokens": 670,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 7.6
+  },
+  {
+    "task": "implement_median",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 6,
+    "calls": 6,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 24326,
+    "completion_tokens": 1437,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 11.1
+  },
+  {
+    "task": "preserve_order",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 10,
+    "calls": 10,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 49250,
+    "completion_tokens": 2333,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 4,
+    "seconds": 20.5
+  },
+  {
+    "task": "two_file_constant",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='ok' labels='alpha beta'",
+    "outcome": "completed",
+    "turns": 4,
+    "calls": 6,
+    "errors_by_tag": {},
+    "prompt_tokens": 14985,
+    "completion_tokens": 473,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 4.2
+  },
+  {
+    "task": "add_validation",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 7,
+    "calls": 7,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 32956,
+    "completion_tokens": 1988,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 2,
+    "seconds": 13.3
+  },
+  {
+    "task": "fix_import",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='helped'",
+    "outcome": "completed",
+    "turns": 6,
+    "calls": 7,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 26165,
+    "completion_tokens": 1028,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 9.5
+  },
+  {
+    "task": "read_and_report",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "answer='The deploy window is 02:00-04:00 UTC on weekdays.'",
+    "outcome": "completed",
+    "turns": 2,
+    "calls": 1,
+    "errors_by_tag": {},
+    "prompt_tokens": 6785,
+    "completion_tokens": 85,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 0,
+    "seconds": 1.5
+  },
+  {
+    "task": "fix_two_bugs",
+    "config": "serial_tools",
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 5,
+    "calls": 5,
+    "errors_by_tag": {
+      "execute_failed:RuntimeError": 1
+    },
+    "prompt_tokens": 19435,
+    "completion_tokens": 694,
+    "cost": 0.0,
+    "verified": true,
+    "mutations": 1,
+    "seconds": 6.7
+  }
+]

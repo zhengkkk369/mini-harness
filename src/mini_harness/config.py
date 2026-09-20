@@ -9,6 +9,27 @@ from mini_harness.bench_profile import BENCH_OVERRIDE
 
 load_dotenv(find_dotenv(usecwd=True))
 
+def normalize_no_proxy() -> str|None:
+    """Rewrite bracketed IPv6 entries in NO_PROXY into a form httpx can parse.
+
+    ``[::1]`` is a legitimate way to write an IPv6 loopback in NO_PROXY, but
+    httpx 0.28 builds a URLPattern from every entry and raises
+    ``InvalidURL: Invalid port: ':1]'`` on the bracketed form. Because that
+    happens while the client is being constructed, a correctly configured
+    machine cannot reach any API at all. Strip the brackets and leave the rest
+    of the list alone.
+    """
+    raw = os.environ.get('NO_PROXY') or os.environ.get('no_proxy')
+    if not raw:
+        return None
+    fixed = raw.replace('[::1]', '::1').replace('[::]', '::')
+    if fixed != raw:
+        os.environ['NO_PROXY'] = fixed
+        os.environ['no_proxy'] = fixed
+    return fixed
+
+normalize_no_proxy()
+
 def default_workspace() -> Path:
     env = os.environ.get("MINI_HARNESS_WORK_SPACE")
     return Path(env).resolve() if env else Path.cwd()

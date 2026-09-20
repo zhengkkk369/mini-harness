@@ -294,6 +294,27 @@ under `.pytest-work/` by the `workspace` and `session_dir` fixtures instead of
 pytest's `tmp_path`, because some sandboxes make `mkdtemp` directories
 read-only.
 
+## Evaluations
+
+Two kinds of evidence live alongside the tests, and they answer different
+questions:
+
+| | measures | needs |
+| --- | --- | --- |
+| [EXPERIMENTS.md](EXPERIMENTS.md), `bench/experiments.py` | the cost and effect of a mechanism, with a scripted model | nothing |
+| [MODEL_EVAL.md](MODEL_EVAL.md), `bench/mini_bench.py` | whether a real model solves tasks, and what a run costs in tokens and turns | an API key |
+
+```sh
+uv run python -m bench.experiments     # offline, scripted client, no API key
+uv run python -m bench.mini_bench      # real model, 8 tasks x 3 configurations
+uv run python -m bench.tui_run         # drive the TUI headlessly (needs textual)
+```
+
+`bench/mini_bench.py` checks every task with an assertion this process runs, so
+a pass never depends on the model claiming success. These are small,
+self-written tasks: they exercise the harness end to end and are not comparable
+to SWE-bench or Terminal-Bench.
+
 ## Benchmark adapters
 
 Run these commands from the repository root after installation. The adapters in
