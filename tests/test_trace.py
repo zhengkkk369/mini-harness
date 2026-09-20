@@ -84,6 +84,43 @@ def test_a_write_failure_disables_the_trace(tmp_path, capsys):
     assert 'disabled' in capsys.readouterr().out
 
 
+def test_events_are_flushed_as_they_are_written(tmp_path):
+    """A crash must not lose the events already emitted."""
+    path = tmp_path / 'trace.jsonl'
+    trace = Trace().configure(path)
+
+    trace.emit('run_start')
+
+    assert len(read_events(path)) == 1       # visible without close()
+
+
+def test_close_is_idempotent_and_ends_the_run(tmp_path):
+    path = tmp_path / 'trace.jsonl'
+    trace = Trace().configure(path)
+    trace.emit('kept')
+
+    trace.close()
+    trace.close()
+    trace.emit('ignored')
+
+    assert [e['event'] for e in read_events(path)] == ['kept']
+    assert trace.enabled is False
+
+
+def test_reconfiguring_closes_the_previous_file(tmp_path):
+    first = tmp_path / 'first.jsonl'
+    second = tmp_path / 'second.jsonl'
+    trace = Trace().configure(first)
+    trace.emit('a')
+
+    trace.configure(second)
+    trace.emit('b')
+    trace.close()
+
+    assert [e['event'] for e in read_events(first)] == ['a']
+    assert [e['event'] for e in read_events(second)] == ['b']
+
+
 # --------------------------------------------------------------------------- retry
 
 

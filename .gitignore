@@ -12,6 +12,7 @@ __pycache__/
 .pytest_cache/
 .pytest-tmp/
 .pytest-work/
+.experiments/
 pytest-cache-files-*/
 .probe/
 .pt2/

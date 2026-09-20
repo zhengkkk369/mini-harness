@@ -11,6 +11,7 @@ import shutil
 import threading
 import uuid
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable, Annotated
@@ -19,6 +20,7 @@ from enum import Enum
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.policy import Policy, DENY
 from mini_harness.trace import TRACE
 from mini_harness.tool.path import validate_read, validate_write, is_denied, _resolve_file
 from mini_harness.tool.block import TODO, CLIP, SUBAGENT
@@ -34,6 +36,12 @@ WRITE_TOOLS = {'write_file', 'edit_file'}
 # Tools whose file-state bookkeeping keys on an explicit file_path argument:
 # the write gate reads it, and read_file uses it to record the read.
 PATH_KEYED_TOOLS = WRITE_TOOLS | {'read_file'}
+# Tools with no side effects, and therefore safe to overlap. run_todo is
+# excluded because it mutates shared state.
+SIDE_EFFECT_FREE_TOOLS = {'read_file', 'grep_file', 'glob_file'}
+# What read_only mode refuses: anything that can change the workspace or the
+# machine, directly or through a subagent.
+READ_ONLY_DENIED = WRITE_TOOLS | {'run_bash', 'run_sandbox', 'run_subagent'}
 
 def _safe_time(p):
     try:
@@ -149,12 +157,17 @@ class ToolItem:
     tag: str = ''
 
 class ToolExecution:
-    def __init__(self, regis: dict, confirm: Callable, cfg = CONFIG) -> None:
+    def __init__(self, regis: dict, confirm: Callable, cfg = CONFIG, policy = None) -> None:
         self.regis = regis
         self.confirm = confirm
         self.cfg = cfg
+        self.policy = policy if policy is not None else Policy.from_config(cfg, READ_ONLY_DENIED)
         self.last_tool = None
         self.files = {}
+        # Read-only batches run concurrently, so the file-state bookkeeping and
+        # the duplicate-call check have to survive two threads at once. The lock
+        # is reentrant because _record updates a record through _mark.
+        self._lock = threading.RLock()
         return
 
     def _mark(self, key: str, level: str) -> None:
@@ -165,17 +178,19 @@ class ToolExecution:
         except OSError:
             return
 
-        old = self.files.get(key)
-        if level == LEVEL.FULL or (old and old.level == LEVEL.FULL):
-            lvl = LEVEL.FULL
-        else:
-            lvl = LEVEL.PARTIAL
-        edits = old.edits if old else 0
-        self.files[key] = FileRecord(mtime, digest, lvl, edits)
+        with self._lock:
+            old = self.files.get(key)
+            if level == LEVEL.FULL or (old and old.level == LEVEL.FULL):
+                lvl = LEVEL.FULL
+            else:
+                lvl = LEVEL.PARTIAL
+            edits = old.edits if old else 0
+            self.files[key] = FileRecord(mtime, digest, lvl, edits)
         return
 
     def _fresh(self, key: str) -> bool:
-        rec = self.files.get(key)
+        with self._lock:
+            rec = self.files.get(key)
         if rec is None:
             return False
 
@@ -245,14 +260,20 @@ class ToolExecution:
 
         elif name in WRITE_TOOLS:
             key = _key(args.file_path, cfg = cfg)
-            old = self.files.get(key)
-            edits = old.edits if old else 0
-            level = LEVEL.FULL if name == 'write_file' else (old.level if old else LEVEL.FULL)
+            with self._lock:
+                old = self.files.get(key)
+                edits = old.edits if old else 0
+                level = LEVEL.FULL if name == 'write_file' else (old.level if old else LEVEL.FULL)
+                self._mark(key, level)
+                # _mark gives up when the file cannot be stat'd, which happens
+                # if the tool itself removed it. Bookkeeping must not raise here:
+                # this runs outside the tool's try block and would end the run.
+                record = self.files.get(key)
+                if record is None:
+                    return content
+                record.edits = edits + 1
+                n = record.edits
 
-            self._mark(key, level)
-            self.files[key].edits = edits + 1
-
-            n = self.files[key].edits
             if cfg.thrash_notice and n >= cfg.thrash_notice:
                 content += (f'\n\n[You have modified this file {n} times without the task passing].\nConsider re-reading it in full, or reconsidering the approach')
         return content
@@ -268,6 +289,30 @@ class ToolExecution:
                    chars = len(item.content), seconds = round(time.time() - started, 4))
         return item
 
+    def execute_batch(self, tool_calls, cfg = CONFIG) -> list[ToolItem]:
+        """Run a batch of tool calls, returning results in the order given.
+
+        A batch overlaps only when every call is side-effect free. Mixing in a
+        write, a risky tool or an unknown name makes the whole batch serial,
+        because those calls can depend on each other's effects.
+        """
+        calls = list(tool_calls)
+        if not self._parallelizable(calls, cfg):
+            return [self.execute_tool(call, cfg = cfg) for call in calls]
+        workers = min(len(calls), cfg.max_parallel_tools)
+        TRACE.emit('batch_parallel', tools = [call.function.name for call in calls], workers = workers)
+        with ThreadPoolExecutor(max_workers = workers) as pool:
+            return list(pool.map(lambda call: self.execute_tool(call, cfg = cfg), calls))
+
+    def _parallelizable(self, calls: list, cfg = CONFIG) -> bool:
+        if not cfg.parallel_tools or len(calls) < 2:
+            return False
+        for call in calls:
+            tool = self.regis.get(call.function.name)
+            if tool is None or tool.risky or tool.name not in SIDE_EFFECT_FREE_TOOLS:
+                return False
+        return True
+
     def _dispatch(self, tool_call, cfg = CONFIG) -> ToolItem:
         tool = self.regis.get(tool_call.function.name)
         if tool is None:
@@ -278,10 +323,16 @@ class ToolExecution:
         except ValidationError as e:
             return ToolItem(f'[{TAG.INVALID_ARGS}]: cannot unpack the json format: {e}', False, TAG.INVALID_ARGS)
 
+        # Policy first: it needs no human, so it also spares one the question.
+        decision = self.policy.decide(tool_call)
+        if decision.decision == DENY:
+            return ToolItem(f'[{TAG.POLICY_DENIED}]: {decision.reason}', False, TAG.POLICY_DENIED)
+
         funs = tool.function
         current = (tool_call.function.name, args.model_dump_json())
-        if self.last_tool == current:
-            return ToolItem(f'[{TAG.DEDUP}]: same tool {tool_call.function.name} and {tool_call.function.arguments} arguments used, please use the other tool or arguments', False, TAG.DEDUP)
+        with self._lock:
+            if self.last_tool == current:
+                return ToolItem(f'[{TAG.DEDUP}]: same tool {tool_call.function.name} and {tool_call.function.arguments} arguments used, please use the other tool or arguments', False, TAG.DEDUP)
         
         gate = self._gate(tool_call.function.name, args, cfg = cfg)
         if gate is not None:
@@ -290,7 +341,8 @@ class ToolExecution:
         if tool.risky:
             if not self.confirm(tool_call, cfg = cfg):
                 return ToolItem(f'[{TAG.DENIED}]: the use of tool was denied by the user, please tell the user about this situation', False, TAG.DENIED)
-        self.last_tool = current
+        with self._lock:
+            self.last_tool = current
         
         try:
             # Pass the config through: without it every tool would fall back to

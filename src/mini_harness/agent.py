@@ -11,9 +11,16 @@ from mini_harness.budget import Budget, STOP_WALL
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
-from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, _atomic_write, log_tool
+from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, _atomic_write, log_tool, WRITE_TOOLS
 from mini_harness.tool.tag import OUTCOME, MARK
 from mini_harness.tool.block import CLIP
+
+VERIFY_TOOLS = {'run_bash', 'run_sandbox'}
+VERIFY_NUDGE = (
+    'You changed files but have not run anything since. Before finishing, run the code or the '
+    'tests that cover your change and show the result. If you cannot verify it, say plainly what '
+    'remains unverified.'
+)
 
 @dataclass(frozen = True)
 class Result:
@@ -30,6 +37,8 @@ class Result:
     err: str = ''
     cost: float = 0.0
     stopped_by: str = ''
+    verified: bool = True
+    mutations: int = 0
 
 
 class DeepSeekAgent:
@@ -149,6 +158,8 @@ class DeepSeekAgent:
         turns = calls = ok = last_prompt = prompt_total = completion_total = 0
         err = ''
         stopped_by = ''
+        mutated = unverified = nudges = 0
+        verified = True
         by_tag = {}
         by_tool = {}
         budget = Budget.from_config(cfg, started = start)
@@ -209,14 +220,20 @@ class DeepSeekAgent:
                     d = message.model_dump(exclude_none = True)
                     self.message.append(d)
                     try:
-                        for tool_call in message.tool_calls:
-                            res = executer.execute_tool(tool_call, cfg =cfg)
+                        results = executer.execute_batch(message.tool_calls, cfg = cfg)
+                        for tool_call, res in zip(message.tool_calls, results):
+                            used = tool_call.function.name
                             calls += 1
-                            by_tool[tool_call.function.name] = by_tool.get(tool_call.function.name, 0) + 1
+                            by_tool[used] = by_tool.get(used, 0) + 1
                             content = CLIP.clip(res.content)
                             if res.ok:
                                 ok += 1
-                                if tool_call.function.name == 'run_todo':
+                                if used in WRITE_TOOLS:
+                                    mutated += 1
+                                    unverified += 1
+                                elif used in VERIFY_TOOLS:
+                                    unverified = 0
+                                if used == 'run_todo':
                                     print(f'\n-=-=-=-=-= Todo List -=-=-=-=-=\n{res.content}')
                             else:
                                 by_tag[res.tag] = by_tag.get(res.tag, 0) + 1
@@ -229,7 +246,19 @@ class DeepSeekAgent:
                         raise
                     self._save_memory(quiet=True)
                 else:
+                    if cfg.verify_required and unverified > 0 and nudges < cfg.verify_nudges:
+                        # The prompt asks for verification; this is what makes it
+                        # happen, at the cost of one bounded extra turn.
+                        nudges += 1
+                        self.message.append(message.model_dump(exclude_none=True))
+                        self.message.append({'role': 'user', 'content': VERIFY_NUDGE})
+                        print(f'\n[verify]: {unverified} edit(s) with no run since, asking the agent to verify')
+                        TRACE.emit('verify_nudge', unverified = unverified, nudge = nudges,
+                                   mutations = mutated, turn = turns)
+                        self._save_memory(quiet=True)
+                        continue
                     outcome = OUTCOME.COMPLETED
+                    verified = unverified == 0
                     self.message.append(
                         message.model_dump(exclude_none=True)
                     )
@@ -261,12 +290,15 @@ class DeepSeekAgent:
             wall = time.time() -start,
             err = err,
             cost = budget.cost,
-            stopped_by = stopped_by
+            stopped_by = stopped_by,
+            verified = verified,
+            mutations = mutated
         )
         TRACE.emit('run_end', outcome = outcome, turns = turns, calls = calls, ok = ok,
                    failed_by_tag = by_tag, calls_by_tool = by_tool,
                    prompt_tokens = prompt_total, completion_tokens = completion_total,
                    cost = round(budget.cost, 6), stopped_by = stopped_by,
+                   verified = verified, mutations = mutated, nudges = nudges,
                    wall = round(result.wall, 4), err = err)
         return result
 
@@ -287,6 +319,7 @@ class DeepSeekAgent:
         )
         result = self._run_turn(client, executer, cfg = cfg)
         self._save_memory(quiet=True)
+        TRACE.close()
         return result
 
     def dump_run(self, result: Result, task: str, path: str|None = None, cfg = CONFIG) -> None:
@@ -352,6 +385,7 @@ class DeepSeekAgent:
                 f'[calls_tool]: {result.calls_by_tool}, [failed]: {result.failed_by_tag}, '
                 f'[last_prompt]: {result.last_prompt}, [last_prompt_tokens]: {result.prompt_total}, [completion_tokens]: {result.completion_total}, '
                 f'[cost]: ${result.cost:.4f}, [stopped_by]: {result.stopped_by or "none"}, '
+                f'[verified]: {result.verified}, [mutations]: {result.mutations}, '
                 f'[wall]: {result.wall:.1f}s, '
                 f'[err]: {result.err}'
             )

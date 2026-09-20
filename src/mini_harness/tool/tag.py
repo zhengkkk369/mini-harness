@@ -14,6 +14,7 @@ class Tag:
     STALE: str = 'stale'
     EXISTS: str = 'exists'
     NEED_FULL: str = 'need_full'
+    POLICY_DENIED: str = 'policy_denied'
 
 @dataclass(frozen = True)
 class Level:

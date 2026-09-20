@@ -11,9 +11,9 @@ from openai.types.chat import ChatCompletion
 from mini_harness import main as cli
 from mini_harness.agent import DeepSeekAgent, Result
 from mini_harness.tool import box
-from mini_harness.tool.box import TOOLS
+from mini_harness.tool.box import TOOLS, ToolDefinition
 from mini_harness.tool.tag import OUTCOME
-from tests.conftest import call, executor, write
+from tests.conftest import REGISTRY, call, executor, write
 
 
 def model_message(content="", tool_calls=None, reasoning=""):
@@ -96,9 +96,21 @@ def make_agent(cfg, *script):
     return agent, FakeClient(script)
 
 
-def send(agent, client, cfg, **kwargs):
+def send(agent, client, cfg, execu=None, **kwargs):
     agent.message.append({"role": "user", "content": "do the thing"})
-    return agent._run_turn(client, executor(cfg), cfg=cfg, **kwargs)
+    return agent._run_turn(client, execu if execu is not None else executor(cfg), cfg=cfg, **kwargs)
+
+
+def stub_shell_executor(cfg, seen=None, confirm=None):
+    """An executor whose run_bash records its command instead of spawning one."""
+    def stub_shell(args, cfg=None):
+        if seen is not None:
+            seen.append(args.command)
+        return 'ok'
+
+    registry = dict(REGISTRY)
+    registry['run_bash'] = ToolDefinition('run_bash', 'stub shell', box.RunBashInput, stub_shell, True)
+    return box.ToolExecution(registry, confirm or box._always_allow, cfg=cfg)
 
 
 # --------------------------------------------------------------------------- happy path
@@ -511,6 +523,202 @@ def test_dump_run_survives_an_unwritable_path(cfg, workspace, capsys, tmp_path):
 def test_tool_schemas_match_the_registry(cfg):
     agent, _ = make_agent(cfg)
     assert [t["function"]["name"] for t in agent.tools] == [t.name for t in TOOLS]
+
+
+# --------------------------------------------------------------------------- verification
+
+
+def test_an_unverified_edit_costs_one_extra_turn(cfg_factory, workspace):
+    cfg = cfg_factory(verify_required=True, verify_nudges=1)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("I changed the file"), 10, 5)),
+        Stream(completion(model_message("still nothing run"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.outcome == OUTCOME.COMPLETED
+    assert result.turns == 4
+    assert result.mutations == 1
+    assert result.verified is False
+    assert len(client.stream_calls) == 4
+
+
+def test_the_nudge_asks_for_a_run(cfg_factory, workspace):
+    cfg = cfg_factory(verify_required=True, verify_nudges=1)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+        Stream(completion(model_message("done again"), 10, 5)),
+    )
+
+    send(agent, client, cfg)
+
+    nudges = [m for m in agent.message
+              if m["role"] == "user" and "have not run anything since" in m["content"]]
+    assert len(nudges) == 1
+
+
+def test_a_run_after_an_edit_counts_as_verification(cfg_factory, workspace):
+    cfg = cfg_factory(verify_required=True)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    seen = []
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("", [call("run_bash", command="echo ok")]), 10, 5)),
+        Stream(completion(model_message("verified"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg, execu=stub_shell_executor(cfg, seen))
+
+    assert result.turns == 4
+    assert result.mutations == 1
+    assert result.verified is True
+    assert seen == ["echo ok"]
+    assert len(client.stream_calls) == 4
+
+
+def test_verification_can_be_switched_off(cfg_factory, workspace):
+    cfg = cfg_factory(verify_required=False)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.turns == 3
+    assert result.mutations == 1
+    assert result.verified is False
+    assert len(client.stream_calls) == 3
+
+
+def test_the_nudge_count_is_bounded(cfg_factory, workspace):
+    cfg = cfg_factory(verify_required=True, verify_nudges=2)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("answer one"), 10, 5)),
+        Stream(completion(model_message("answer two"), 10, 5)),
+        Stream(completion(model_message("answer three"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.turns == 5
+    assert len(client.stream_calls) == 5
+    assert result.verified is False
+
+
+def test_a_read_only_run_needs_no_verification(cfg, workspace):
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.turns == 2
+    assert result.mutations == 0
+    assert result.verified is True
+
+
+def test_a_refused_edit_is_not_a_mutation(cfg, workspace):
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="b")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.mutations == 0
+    assert result.verified is True
+    assert result.turns == 2
+
+
+def test_a_policy_denial_is_reported_as_its_own_tag(cfg_factory, workspace):
+    cfg = cfg_factory(policy_deny_tools=("run_bash",))
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("run_bash", command="ls")]), 10, 5)),
+        Stream(completion(model_message("understood"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.failed_by_tag == {"policy_denied": 1}
+
+
+# --------------------------------------------------------------------------- parallel
+
+
+def test_the_agent_runs_a_read_batch_concurrently(cfg_factory, session_dir, patch_openai):
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(trace))
+    write(cfg.work_space / "sandbox" / "a.py", "alpha\n")
+    write(cfg.work_space / "sandbox" / "b.py", "beta\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [
+            call("read_file", file_path="sandbox/a.py"),
+            call("read_file", file_path="sandbox/b.py"),
+        ]), 20, 5)),
+        Stream(completion(model_message("done"), 30, 5)),
+    )
+
+    patch_openai(client)
+    result = agent.run_task("read both", cfg=cfg)
+
+    assert result.calls == 2 and result.ok == 2
+    batch = next(e for e in traced_events(trace) if e["event"] == "batch_parallel")
+    assert batch["tools"] == ["read_file", "read_file"]
+    tool_messages = [m for m in agent.message if m["role"] == "tool"]
+    assert "alpha" in tool_messages[0]["content"]
+    assert "beta" in tool_messages[1]["content"]
+
+
+def test_a_mixed_batch_is_not_parallelized(cfg_factory, session_dir, patch_openai):
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(trace))
+    write(cfg.work_space / "sandbox" / "a.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [
+            call("read_file", file_path="sandbox/a.py"),
+            call("write_file", file_path="sandbox/new.py", content="x"),
+        ]), 20, 5)),
+        Stream(completion(model_message("done"), 30, 5)),
+        Stream(completion(model_message("verified enough"), 30, 5)),
+    )
+
+    patch_openai(client)
+    agent.run_task("go", cfg=cfg)
+
+    assert not [e for e in traced_events(trace) if e["event"] == "batch_parallel"]
 
 
 # --------------------------------------------------------------------------- trace

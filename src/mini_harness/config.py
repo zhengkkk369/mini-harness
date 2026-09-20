@@ -13,6 +13,20 @@ def default_workspace() -> Path:
     env = os.environ.get("MINI_HARNESS_WORK_SPACE")
     return Path(env).resolve() if env else Path.cwd()
 
+TRUE_WORDS = frozenset({'1', 'true', 'yes', 'on'})
+FALSE_WORDS = frozenset({'0', 'false', 'no', 'off'})
+
+def env_flag(value: str, name: str) -> bool:
+    token = value.strip().lower()
+    if token in TRUE_WORDS:
+        return True
+    if token in FALSE_WORDS:
+        return False
+    raise ValueError(f'{name} must be one of {sorted(TRUE_WORDS | FALSE_WORDS)}, got {value!r}')
+
+def env_list(value: str) -> tuple:
+    return tuple(part.strip() for part in value.split(',') if part.strip())
+
 @dataclass(frozen = True)
 class Config:
     # default_factory, not a direct call: a direct call would freeze the
@@ -59,6 +73,21 @@ class Config:
     cost_budget: float|None = None
     price_in: float|None = None
     price_out: float|None = None
+
+    # Tool execution. A batch runs concurrently only when every call is
+    # side-effect free, so read-only batches are the only ones that overlap.
+    parallel_tools: bool = True
+    max_parallel_tools: int = 4
+
+    # Dispatch policy, applied before the gate and before approval.
+    policy_deny_tools: tuple = ()
+    policy_deny_patterns: tuple = ()
+    read_only: bool = False
+
+    # Verification. When required, finishing with unverified edits costs one
+    # extra turn asking the agent to run something first.
+    verify_required: bool = True
+    verify_nudges: int = 1
 
     max_retry: int = 5
     retry_base: float = 2.0
@@ -313,6 +342,19 @@ def build_config() -> Config:
             overrides[name] = float(value)
     if trace := os.environ.get('MINI_HARNESS_TRACE'):
         overrides['trace_path'] = trace
+    for name in ('max_parallel_tools', 'verify_nudges'):
+        if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
+            if int(value) <= 0:
+                raise ValueError(f'{name} must be positive')
+            overrides[name] = int(value)
+    for name in ('parallel_tools', 'read_only', 'verify_required'):
+        variable = f'MINI_HARNESS_{name.upper()}'
+        if value := os.environ.get(variable):
+            overrides[name] = env_flag(value, variable)
+    for field_name, variable in (('policy_deny_tools', 'MINI_HARNESS_DENY_TOOLS'),
+                                 ('policy_deny_patterns', 'MINI_HARNESS_DENY_PATTERNS')):
+        if value := os.environ.get(variable):
+            overrides[field_name] = env_list(value)
     sub_model = overrides.get('model_sub')
     if sub_model and sub_model.partition('/')[0] in {'openai', 'deepseek'}:
         prefix, _, name = sub_model.partition('/')

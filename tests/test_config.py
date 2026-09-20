@@ -20,6 +20,9 @@ def isolated_env(monkeypatch):
         "MINI_HARNESS_MAX_TOKENS_MAIN", "MINI_HARNESS_MAX_TOKENS_SUB", "MINI_HARNESS_COMPACT_LIMIT",
         "MINI_HARNESS_TOKEN_BUDGET", "MINI_HARNESS_COST_BUDGET", "MINI_HARNESS_WALL_BUDGET",
         "MINI_HARNESS_PRICE_IN", "MINI_HARNESS_PRICE_OUT", "MINI_HARNESS_TRACE",
+        "MINI_HARNESS_PARALLEL_TOOLS", "MINI_HARNESS_MAX_PARALLEL_TOOLS", "MINI_HARNESS_READ_ONLY",
+        "MINI_HARNESS_VERIFY_REQUIRED", "MINI_HARNESS_VERIFY_NUDGES",
+        "MINI_HARNESS_DENY_TOOLS", "MINI_HARNESS_DENY_PATTERNS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -127,6 +130,72 @@ def test_workspace_defaults_to_the_working_directory():
 def test_workspace_can_be_pointed_elsewhere(monkeypatch, tmp_path):
     monkeypatch.setenv("MINI_HARNESS_WORK_SPACE", str(tmp_path))
     assert build_config().work_space == tmp_path.resolve()
+
+
+# --------------------------------------------------------------------------- execution policy
+
+
+def test_execution_defaults():
+    cfg = build_config()
+    assert cfg.parallel_tools is True
+    assert cfg.max_parallel_tools == 4
+    assert cfg.read_only is False
+    assert cfg.verify_required is True
+    assert cfg.verify_nudges == 1
+    assert cfg.policy_deny_tools == ()
+    assert cfg.policy_deny_patterns == ()
+
+
+@pytest.mark.parametrize("variable,field", [
+    ("MINI_HARNESS_PARALLEL_TOOLS", "parallel_tools"),
+    ("MINI_HARNESS_READ_ONLY", "read_only"),
+    ("MINI_HARNESS_VERIFY_REQUIRED", "verify_required"),
+])
+def test_boolean_switches_are_read_from_the_environment(monkeypatch, variable, field):
+    monkeypatch.setenv(variable, "true")
+    assert getattr(build_config(), field) is True
+
+    monkeypatch.setenv(variable, "0")
+    assert getattr(build_config(), field) is False
+
+
+def test_a_garbage_boolean_is_rejected(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_READ_ONLY", "maybe")
+    with pytest.raises(ValueError, match="must be one of"):
+        build_config()
+
+
+@pytest.mark.parametrize("variable,field", [
+    ("MINI_HARNESS_MAX_PARALLEL_TOOLS", "max_parallel_tools"),
+    ("MINI_HARNESS_VERIFY_NUDGES", "verify_nudges"),
+])
+def test_count_switches_are_read_from_the_environment(monkeypatch, variable, field):
+    monkeypatch.setenv(variable, "3")
+    assert getattr(build_config(), field) == 3
+
+
+@pytest.mark.parametrize("variable", [
+    "MINI_HARNESS_MAX_PARALLEL_TOOLS", "MINI_HARNESS_VERIFY_NUDGES",
+])
+def test_non_positive_counts_are_rejected(monkeypatch, variable):
+    monkeypatch.setenv(variable, "0")
+    with pytest.raises(ValueError, match="must be positive"):
+        build_config()
+
+
+def test_deny_lists_are_split_on_commas(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_DENY_TOOLS", "run_bash, run_sandbox")
+    monkeypatch.setenv("MINI_HARNESS_DENY_PATTERNS", "rm -rf*,curl * | sh")
+
+    cfg = build_config()
+
+    assert cfg.policy_deny_tools == ("run_bash", "run_sandbox")
+    assert cfg.policy_deny_patterns == ("rm -rf*", "curl * | sh")
+
+
+def test_a_blank_deny_list_leaves_the_default(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_DENY_TOOLS", " , ")
+    assert build_config().policy_deny_tools == ()
 
 
 # --------------------------------------------------------------------------- budgets

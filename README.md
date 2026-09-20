@@ -16,7 +16,7 @@
 
 - **Small, but complete.** About 1,700 lines of Python: nine tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 274 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 330 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the nine tools, context compaction, configuration and the sandbox
   command builder.
@@ -25,7 +25,12 @@
   The definition contract is enforced in code, not just written in the prompt.
 - **Bounded and observable.** Optional token, cost and wall-clock budgets stop a
   run before it gets expensive, and an opt-in JSONL [trace](src/mini_harness/trace.py)
-  records every turn, tool call, retry and compaction.
+  records every turn, tool call, retry and compaction. The measured cost of that
+  trace is in [EXPERIMENTS.md](EXPERIMENTS.md).
+- **Concurrent where it is safe, refused where it is not.** Read-only tool
+  batches run in a thread pool; a policy layer refuses denied tools and commands
+  before approval, and there is a read-only mode. Finishing with unverified
+  edits costs one bounded extra turn.
 - **A practical baseline.** Evaluated on SWE-bench Verified and Terminal-Bench
   2.1 with DeepSeek V4 Flash. See the results below.
 - **Built for learning.** Follow the [agent loop](src/mini_harness/agent.py),
@@ -135,12 +140,64 @@ CLI turns a spent budget into exit code 5.
 Set `MINI_HARNESS_TRACE` to a path to record what the run actually did. The
 [trace](src/mini_harness/trace.py) is an append-only JSONL file, one object per
 event, with a monotonic `seq` and a `ts`: `run_start`, `turn`, `usage`,
-`tool_call`, `tool_result`, `retry`, `compact`, `subagent_start`,
-`subagent_end`, `run_end`. It is off by default and every emit is a no-op when
-it is off, so it costs nothing when unused. A write failure disables the trace
-instead of failing the run. The bench profile writes one next to its session
-file. The session file and the compaction audit log are unchanged: the trace is
-for observing a run, not for resuming it.
+`tool_call`, `tool_result`, `batch_parallel`, `retry`, `compact`,
+`subagent_start`, `subagent_end`, `verify_nudge`, `budget_stop`, `run_end`. It is
+off by default and every emit is a no-op when it is off, so it costs nothing
+when unused. The file is opened once per run and flushed per event, so a crash
+keeps everything already written. A write failure disables the trace instead of
+failing the run. The bench profile writes one next to its session file. The
+session file and the compaction audit log are unchanged: the trace is for
+observing a run, not for resuming it.
+
+## Execution policy and verification
+
+A tool call passes four independent checks, cheapest first:
+
+1. **Policy** — no human needed, so it also spares one the question. Deny tools
+   by name, or deny commands by pattern. In `read_only` mode everything that can
+   mutate is refused: `write_file`, `edit_file`, `run_bash`, `run_sandbox`,
+   `run_subagent`.
+2. **File-state gate** — an edit needs a prior read of that exact file, and the
+   file must not have changed since.
+3. **Approval** — risky tools ask, unless the caller supplies its own rule.
+4. **Duplicate check** — the same call with the same arguments twice in a row.
+
+A policy refusal is tagged `policy_denied` rather than `denied`, so it stays
+distinguishable from a human saying no.
+
+```sh
+export MINI_HARNESS_DENY_TOOLS=run_sandbox          # comma separated tool names
+export MINI_HARNESS_DENY_PATTERNS='rm -rf*,curl * | sh'
+export MINI_HARNESS_READ_ONLY=true                  # analyse, never mutate
+```
+
+Patterns are matched against the `command` argument when the tool takes one, and
+against the raw arguments otherwise.
+
+Read-only tool batches (`read_file`, `grep_file`, `glob_file`) run concurrently,
+because they cannot affect each other. One write, one risky tool or one unknown
+name makes the whole batch serial. Results are returned in the order the model
+asked for them regardless, and the file-state bookkeeping is lock-protected.
+
+```sh
+export MINI_HARNESS_PARALLEL_TOOLS=false   # force serial execution
+export MINI_HARNESS_MAX_PARALLEL_TOOLS=4   # workers per batch
+```
+
+The system prompt asks the agent to verify its work before finishing. That is
+now also a mechanism: if a run made edits and nothing has been run since, the
+agent gets one bounded extra turn asking it to run something, and `Result.verified`
+reports whether it did. Measured cost and behaviour are in
+[EXPERIMENTS.md](EXPERIMENTS.md).
+
+```sh
+export MINI_HARNESS_VERIFY_REQUIRED=false  # do not spend the extra turn
+export MINI_HARNESS_VERIFY_NUDGES=2        # how many times to ask
+```
+
+`verified` means a shell command succeeded after the last edit. It does not prove
+the command tested the change, and it is reported as a flag rather than treated
+as proof.
 
 ## Get started
 
@@ -218,8 +275,13 @@ uv run --locked pytest
 | `tests/test_config.py` | provider inference, environment overrides, and the bench profile |
 | `tests/test_sandbox.py` | the Docker command line, isolation flags, mount scope, and cleanup |
 | `tests/test_budget.py` | token, cost and wall-clock arithmetic and the stop decision |
-| `tests/test_trace.py` | the JSONL event log and retry backoff reporting |
+| `tests/test_trace.py` | the JSONL event log, flushing and failure handling |
 | `tests/test_contract.py` | the tool-definition and registry contracts |
+| `tests/test_parallel.py` | batch overlap (proved with a barrier, not a stopwatch) and eligibility |
+| `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
+
+For measurements rather than pass/fail, see [EXPERIMENTS.md](EXPERIMENTS.md) and
+`uv run python -m bench.experiments`.
 
 Two environment notes. `run_bash` spawns a real shell, so its tests record the
 subprocess call rather than capturing a child's output, which keeps them

@@ -1,0 +1,121 @@
+{
+  "python": "3.12.13",
+  "platform": "win32",
+  "repeats": 7,
+  "parallel": [
+    {
+      "latency_ms": 0.0,
+      "calls": 6,
+      "serial": {
+        "median_ms": 32.3082999966573,
+        "min_ms": 31.60060000664089,
+        "max_ms": 49.257299993769266
+      },
+      "parallel": {
+        "median_ms": 23.477599999750964,
+        "min_ms": 21.276200001011603,
+        "max_ms": 87.89549999346491
+      },
+      "speedup": 1.3761329947268888
+    },
+    {
+      "latency_ms": 5.0,
+      "calls": 6,
+      "serial": {
+        "median_ms": 67.61959999857936,
+        "min_ms": 65.44629999552853,
+        "max_ms": 69.65499999932945
+      },
+      "parallel": {
+        "median_ms": 25.717000011354685,
+        "min_ms": 24.86700000008568,
+        "max_ms": 31.79900000395719
+      },
+      "speedup": 2.629373564907402
+    },
+    {
+      "latency_ms": 20.0,
+      "calls": 6,
+      "serial": {
+        "median_ms": 156.46370001195464,
+        "min_ms": 155.12429999944288,
+        "max_ms": 158.8538000069093
+      },
+      "parallel": {
+        "median_ms": 41.504799999529496,
+        "min_ms": 39.634400003706105,
+        "max_ms": 43.32060000160709
+      },
+      "speedup": 3.7697736168763214
+    }
+  ],
+  "trace": [
+    {
+      "trace": "off",
+      "median_ms": 92.79629999946337,
+      "min_ms": 86.12639999773819,
+      "max_ms": 102.77209999912884,
+      "bytes": 0
+    },
+    {
+      "trace": "on",
+      "median_ms": 105.94789999595378,
+      "min_ms": 96.39869999955408,
+      "max_ms": 171.3242999976501,
+      "bytes": 10882
+    },
+    {
+      "trace": "overhead",
+      "delta_ms": 13.151599996490404,
+      "bytes": 10882
+    }
+  ],
+  "verify": [
+    {
+      "scenario": "off, edit then answer",
+      "turns": 3,
+      "mutations": 1,
+      "verified": false,
+      "nudges": 0,
+      "outcome": "completed"
+    },
+    {
+      "scenario": "on, edit then answer",
+      "turns": 4,
+      "mutations": 1,
+      "verified": false,
+      "nudges": 1,
+      "outcome": "completed"
+    },
+    {
+      "scenario": "on, edit then run then answer",
+      "turns": 4,
+      "mutations": 1,
+      "verified": true,
+      "nudges": 0,
+      "outcome": "completed"
+    }
+  ],
+  "policy": [
+    {
+      "call": "run_bash: rm -rf /",
+      "ok": false,
+      "tag": "policy_denied"
+    },
+    {
+      "call": "run_bash: ls -la",
+      "ok": true,
+      "tag": "success"
+    },
+    {
+      "call": "run_sandbox: ls",
+      "ok": false,
+      "tag": "policy_denied"
+    },
+    {
+      "call": "read_file: tree/f000.py",
+      "ok": true,
+      "tag": "success"
+    }
+  ]
+}
