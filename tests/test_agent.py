@@ -26,10 +26,13 @@ def model_message(content="", tool_calls=None, reasoning=""):
     )
 
 
-def completion(message, prompt_tokens=100, completion_tokens=20):
+def completion(message, prompt_tokens=100, completion_tokens=20, cached_tokens=None):
+    usage = SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+    if cached_tokens is not None:
+        usage.prompt_cache_hit_tokens = cached_tokens
     return SimpleNamespace(
         choices=[SimpleNamespace(message=message)],
-        usage=SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+        usage=usage,
     )
 
 
@@ -408,6 +411,29 @@ def test_cost_stays_zero_without_prices(cfg_factory):
 
     assert result.outcome == OUTCOME.COMPLETED
     assert result.cost == 0.0
+
+
+def test_cost_accounts_for_cached_input(cfg_factory):
+    """Cached input can be a fraction of the normal rate, so it must be split."""
+    cfg = cfg_factory(price_in=1.0, price_out=0.0, price_cache_in=0.1)
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("done"), 1_000_000, 0, cached_tokens=900_000)),
+    )
+
+    result = send(agent, client, cfg)
+
+    # 100k uncached at 1.0 plus 900k cached at 0.1
+    assert result.cost == pytest.approx(0.19)
+
+
+def test_an_unknown_cache_shape_bills_the_prompt_in_full(cfg_factory):
+    cfg = cfg_factory(price_in=1.0, price_out=0.0, price_cache_in=0.1)
+    agent, client = make_agent(cfg, Stream(completion(model_message("done"), 1_000_000, 0)))
+
+    result = send(agent, client, cfg)
+
+    assert result.cost == pytest.approx(1.0)
 
 
 def test_interrupted_tool_calls_are_closed_off(cfg, workspace):
@@ -845,6 +871,27 @@ def test_tool_events_name_the_failure_tag(cfg_factory, session_dir, patch_openai
     result = next(e for e in traced_events(trace) if e["event"] == "tool_result")
     assert result["ok"] is False
     assert result["tag"] == "need_read"
+
+
+def test_usage_events_carry_that_turn_s_cached_count(cfg_factory, session_dir, patch_openai):
+    """Per-turn events carry a delta; only run_end is cumulative."""
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(trace))
+    write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]),
+                          100, 5, cached_tokens=40)),
+        Stream(completion(model_message("done"), 200, 5, cached_tokens=150)),
+    )
+
+    patch_openai(client)
+    agent.run_task("read it", cfg=cfg)
+
+    events = traced_events(trace)
+    usage = [event for event in events if event["event"] == "usage"]
+    assert [event["cached"] for event in usage] == [40, 150]
+    assert events[-1]["cached_tokens"] == 190
 
 
 def test_run_start_records_the_configured_limits(cfg_factory, session_dir, patch_openai):

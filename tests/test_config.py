@@ -36,7 +36,7 @@ def test_default_profile_is_local_deepseek():
     cfg = build_config()
     assert cfg.profile == "local"
     assert cfg.provider == "deepseek"
-    assert cfg.model_main == "deepseek-v4-flash"
+    assert cfg.model_main == "deepseek-flash"
     assert cfg.api_key_env == "DEEPSEEK_API_KEY"
     assert cfg.guard_read and cfg.guard_write
 

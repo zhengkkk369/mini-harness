@@ -76,87 +76,122 @@ The count and the line count are both correct, so the whole path works: TUI
 event loop, JSON worker protocol, real tool execution, real model, streaming
 into the feed.
 
-## 2. Mini benchmark: 8 tasks, 3 configurations
+## 2. Mini benchmark: 12 tasks, 4 configurations, 2 repeats
 
 `bench/mini_bench.py` — every task is stdlib-only and every check is an
 assertion run by the harness process, so a pass never depends on the model
-saying it passed. Three configurations run the same eight tasks:
+saying it passed. There are twelve tasks now, and four of them state their
+contract only in prose and ship no checker in the sandbox, so whether the code is
+ever run is entirely the model's choice.
 
 | config | what changes |
 | --- | --- |
 | `baseline` | repository defaults |
 | `no_verify` | `verify_required=False` |
 | `serial_tools` | `parallel_tools=False` |
+| `unverifiable` | `run_bash` and `run_sandbox` denied, so the nudge cannot be satisfied |
 
-### Result per task
+### Aggregate over 72 runs
 
-| config | task | pass | turns | calls | tokens | verified | s |
-| --- | --- | :-: | ---: | ---: | ---: | :-: | ---: |
-| baseline | fix_syntax | yes | 5 | 4 | 18,507 | yes | 8.6 |
-| baseline | implement_median | yes | 8 | 9 | 37,727 | yes | 12.1 |
-| baseline | preserve_order | yes | 9 | 9 | 41,801 | yes | 11.5 |
-| baseline | two_file_constant | yes | 5 | 7 | 19,860 | yes | 6.2 |
-| baseline | add_validation | yes | 11 | 11 | 76,264 | yes | 28.2 |
-| baseline | fix_import | yes | 5 | 5 | 19,132 | yes | 6.1 |
-| baseline | read_and_report | yes | 2 | 1 | 6,859 | yes | 2.2 |
-| baseline | fix_two_bugs | yes | 7 | 7 | 30,672 | yes | 13.0 |
-| no_verify | fix_syntax | yes | 5 | 4 | 18,447 | yes | 5.9 |
-| no_verify | implement_median | yes | 10 | 10 | 48,237 | yes | 18.2 |
-| no_verify | preserve_order | yes | 7 | 7 | 29,346 | yes | 11.4 |
-| no_verify | two_file_constant | yes | 5 | 8 | 19,683 | yes | 8.6 |
-| no_verify | add_validation | yes | 10 | 10 | 66,328 | yes | 23.5 |
-| no_verify | fix_import | yes | 6 | 6 | 24,500 | yes | 9.5 |
-| no_verify | read_and_report | yes | 2 | 1 | 6,893 | yes | 1.2 |
-| no_verify | fix_two_bugs | yes | 7 | 8 | 29,899 | yes | 10.0 |
-| serial_tools | fix_syntax | yes | 6 | 5 | 23,132 | yes | 7.6 |
-| serial_tools | implement_median | yes | 6 | 6 | 25,763 | yes | 11.1 |
-| serial_tools | preserve_order | yes | 10 | 10 | 51,583 | yes | 20.5 |
-| serial_tools | two_file_constant | yes | 4 | 6 | 15,458 | yes | 4.2 |
-| serial_tools | add_validation | yes | 7 | 7 | 34,944 | yes | 13.3 |
-| serial_tools | fix_import | yes | 6 | 7 | 27,193 | yes | 9.5 |
-| serial_tools | read_and_report | yes | 2 | 1 | 6,870 | yes | 1.5 |
-| serial_tools | fix_two_bugs | yes | 5 | 5 | 20,129 | yes | 6.7 |
+| config | passed | rate | nudges | total tokens |
+| --- | ---: | ---: | ---: | ---: |
+| baseline | 23/24 | 96% | 0 | 915,522 |
+| no_verify | 24/24 | 100% | 0 | 972,039 |
+| serial_tools | 24/24 | 100% | 0 | 1,003,774 |
 
-### Aggregate
+**The suite still cannot rank the configurations.** 71 of 72 runs passed, and the
+mechanisms under test never fired in any of them. What it does show is that the
+tasks are solved robustly and that the harness behaves the same with the
+mechanisms on and off. See Limitations.
 
-| config | passed | rate | median turns | total turns | total tokens |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| baseline | 8/8 | 100% | 7 | 52 | 250,822 |
-| no_verify | 8/8 | 100% | 7 | 52 | 243,333 |
-| serial_tools | 8/8 | 100% | 6 | 46 | 205,072 |
+One mechanism did engage on its own: the model emitted several side-effect-free
+calls in a single turn in most runs, so `parallel_tools` produced real batches
+(1–4 per task) in `baseline` and `no_verify`, and none in `serial_tools`, as it
+must. The concurrent path is exercised in normal use rather than only by tests.
 
-**The honest headline is that this suite is too easy.** 24/24 passed, so it
-cannot separate the configurations, and the differences in turns and tokens are
-within run-to-run noise at n=8 with a single repetition each — in particular the
-`serial_tools` column looking cheapest is not something I would claim as a real
-effect. See Limitations.
+### The one failure was my defect, not the model's
 
-### What the traces showed
+`baseline/numeric_ids` failed on one of its two repeats. The trace shows the
+model read the file, grepped for a checker, and then **stopped without editing
+anything** — `mutations=0`, three turns — with this answer:
 
-Every run wrote a trace, and the trace answers the question the scripted
-experiments could not: does the verification loop actually fire?
+> How should a *mixed* list behave, e.g. `["10", "2", "a"]`? ... Both satisfy
+> your stated examples (`2` < `9` < `10`), so I can't derive the mixed case.
 
-| config | runs | turns | tool calls | **verify nudges** | parallel batches | retries |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| baseline | 8 | 52 | 53 | **0** | 6 | 0 |
-| no_verify | 8 | 52 | 54 | **0** | 8 | 0 |
-| serial_tools | 8 | 46 | 47 | **0** | 0 | 0 |
+It was right. The task said "numerically when they are all digits, and lexically
+otherwise", and the checker exercised only an all-digit list and an all-letter
+list, so **both readings passed**. The model noticed the ambiguity and asked
+rather than guessing, which is what the local system prompt asks for ("when the
+task is ambiguous ... ask before acting"). `run_task` is unattended, so nobody
+could answer and the run simply ended.
 
-Two findings worth keeping:
+Two things came out of it:
 
-- **The nudge never fired, and that is the correct outcome.** In all 24 runs the
-  model ran the code after editing it, so `verified` was already true when it
-  stopped. For small, well-specified tasks with a capable model, the prompt's
-  instruction is followed and the mechanism costs nothing. It also means these
-  tasks cannot measure the mechanism's *benefit* — that needs a model or a task
-  that stops without verifying.
-- **Parallel execution engaged on its own.** The model emitted several
-  side-effect-free calls in one turn in 6 of 8 baseline runs (8 of 8 with
-  verification off), so the concurrent path is exercised in normal use rather
-  than being a feature that only tests reach. `serial_tools` shows 0 batches, as
-  it must.
+- The task now settles the mixed case explicitly and the checker tests it. The
+  fixed task passes 4/4.
+- A run that edits nothing reports `verified=True`, because there are no
+  outstanding edits to verify. That is vacuously true rather than reassuring, so
+  the report prints `n/a` when a run made no edits; `Result.mutations` is the
+  field to read alongside the flag.
 
-No retries fired in any run, so the backoff path was not exercised.
+### The verification loop, where it can be observed
+
+Because the nudge never fires on tasks the model verifies itself, a fourth
+configuration removes the ability to verify at all: `run_bash` and `run_sandbox`
+are denied by policy.
+
+| | |
+| --- | --- |
+| runs | 8 |
+| passed | 8/8 |
+| nudges fired | **8 — exactly one per run** |
+| `verified` | `0/2` on every task |
+| median turns | 9–12 |
+| cost | $0.0181 |
+
+- **It fires under its precondition.** With verification impossible, every run
+  stopped unverified and every run was nudged.
+- **It is bounded.** Exactly one nudge per run, never a loop, so a run that
+  cannot satisfy it still terminates.
+- **It reports the truth.** `verified` is false in all eight, because nothing
+  could be run.
+- **Its benefit is still unmeasured.** All eight tasks passed anyway. Denying the
+  shell did not stop the model from reading the contract and editing the file; it
+  only removed the ability to check the result. Showing a benefit needs tasks
+  where the first attempt is wrong, and these are not those.
+
+This configuration also exposes the mechanism's criterion. It asks whether a
+shell command *succeeded after the last edit*, not whether that command tested
+the change. The failure above is a case in point: `verified` was true there
+because nothing had been edited at all, and the criterion would not have objected
+even if something had, since a command that proves nothing satisfies it just as
+well as one that proves the fix.
+
+### Cost, and why the cache rate matters
+
+Prices are the provider's published ones, fetched on the day of the run, for
+`deepseek-flash` — which is also what the legacy name `deepseek-v4-flash`
+resolves to:
+
+| per 1M tokens | off-peak | peak |
+| --- | ---: | ---: |
+| input, cache hit | $0.003 | $0.006 |
+| input, cache miss | $0.15 | $0.30 |
+| output | $0.60 | $1.20 |
+
+The runs happened on a Sunday evening UTC, which is off-peak. Of the 412,099
+input tokens the eight priced runs sent, **392,832 came from the cache — 95.3%**.
+That is expected rather than surprising: every turn resends the same system
+prompt and tool schemas.
+
+One input price cannot express that. `Budget` now takes an optional
+`price_cache_in` and splits the prompt, and the trace carries the per-turn cached
+count. Without the split those eight runs look like $0.0758 instead of $0.0181 —
+an overstatement of **4.2x**.
+
+Pricing stays optional: unset means cost is zero, and setting
+`price_in`/`price_out` without `price_cache_in` bills cached input at the full
+rate, which is an upper bound rather than an undercount.
 
 ## 3. The MCP bridge, against a real server
 
@@ -291,16 +326,20 @@ task instead of 500.
 
 ## Limitations
 
-- **Ceiling effect.** The mini suite is 8 easy tasks and the model solved all of
-  them under every configuration. It cannot rank configurations. Its value is
-  that it exercises the harness end to end against a real model and produces
-  token, turn and trace data.
-- **n=1 per cell.** Each task ran once per configuration. The turn and token
-  differences above should not be read as effects; only the trace counts
+- **Ceiling effect.** The mini suite is twelve small tasks and the model solved
+  71 of 72 runs. It cannot rank configurations. Its value is that it exercises
+  the harness end to end against a real model and produces token, turn and trace
+  data — and that its one failure was informative.
+- **Two repeats per cell is still few.** The turn and token differences between
+  configurations should not be read as effects; only the mechanism counts
   (nudges, parallel batches) are structural rather than statistical.
-- **Cost is not reported.** The runs record tokens but no prices were
-  configured, so every cost figure is $0.0000 and is omitted rather than
-  invented. Pass `--price-in` and `--price-out` to get real numbers.
+- **The ambiguity lesson.** One task was underspecified and the model asked
+  instead of guessing, which in an unattended run scores as a failure. Any task
+  whose stated examples do not pin down the expected behaviour will produce
+  these, and they are the task author's defect.
+- **The verification loop's benefit is unmeasured.** It fires only when a run
+  stops unverified, which this model does not do on these tasks. What is measured
+  is that it fires when it must, that it is bounded, and that it does not lie.
 - **The TUI run is one prompt**, driven through a test pilot rather than a real
   keyboard. Approval modals, session switching and cancellation were not driven.
 - **Task choice is mine.** These are the tasks I wrote; they are not a
@@ -310,14 +349,19 @@ task instead of 500.
 - **The SWE-bench figure is a single task.** 0/1 is an anecdote that shows the
   pipeline works end to end; it is not a score and does not compare to the
   401/500 recorded in [BENCHMARKS.md](BENCHMARKS.md).
+- **Prices move, and peak is double off-peak.** The cost figures come from the
+  provider's published rates on the day, at off-peak. Re-check them before
+  quoting any of these numbers, and pass `--price-in`, `--price-out` and
+  `--price-cache-in` to reproduce them.
 
 ## Reproducing
 
 ```sh
-uv run python -m bench.mini_bench                     # all three configs, writes MINI_BENCH.json
-uv run python -m bench.mini_bench --only baseline --tasks fix_syntax
-uv run python -m bench.mini_bench --price-in 0.28 --price-out 0.42
+uv run python -m bench.mini_bench                 # default configs, writes MINI_BENCH.json
+uv run python -m bench.mini_bench --repeats 2     # repeat every cell
+uv run python -m bench.mini_bench --only unverifiable --price-in 0.15 \
+    --price-out 0.60 --price-cache-in 0.003       # the priced run above
 ```
 
-The TUI run used a small pilot driver that is not part of the repository; the
-raw results of the recorded runs are in [MINI_BENCH.json](MINI_BENCH.json).
+The raw results of the recorded runs are in [MINI_BENCH.json](MINI_BENCH.json)
+and [MINI_BENCH_PRICED.json](MINI_BENCH_PRICED.json).

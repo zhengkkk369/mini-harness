@@ -1,0 +1,170 @@
+[
+  {
+    "task": "normalize_whitespace",
+    "config": "unverifiable",
+    "repeat": 0,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 9,
+    "calls": 8,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 45032,
+    "completion_tokens": 1986,
+    "cost": 0.001662,
+    "verified": false,
+    "mutations": 1,
+    "nudges": 1,
+    "parallel_batches": 1,
+    "seconds": 14.8
+  },
+  {
+    "task": "normalize_whitespace",
+    "config": "unverifiable",
+    "repeat": 1,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 9,
+    "calls": 9,
+    "errors_by_tag": {
+      "policy_denied": 3
+    },
+    "prompt_tokens": 51881,
+    "completion_tokens": 4281,
+    "cost": 0.003069,
+    "verified": false,
+    "mutations": 1,
+    "nudges": 1,
+    "parallel_batches": 2,
+    "seconds": 21.2
+  },
+  {
+    "task": "inclusive_bounds",
+    "config": "unverifiable",
+    "repeat": 0,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 9,
+    "calls": 9,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 44232,
+    "completion_tokens": 2446,
+    "cost": 0.001874,
+    "verified": false,
+    "mutations": 1,
+    "nudges": 1,
+    "parallel_batches": 1,
+    "seconds": 14.6
+  },
+  {
+    "task": "inclusive_bounds",
+    "config": "unverifiable",
+    "repeat": 1,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 9,
+    "calls": 9,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 46587,
+    "completion_tokens": 2791,
+    "cost": 0.002096,
+    "verified": false,
+    "mutations": 1,
+    "nudges": 1,
+    "parallel_batches": 1,
+    "seconds": 15.5
+  },
+  {
+    "task": "pure_add_item",
+    "config": "unverifiable",
+    "repeat": 0,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 10,
+    "calls": 8,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 48066,
+    "completion_tokens": 1848,
+    "cost": 0.001601,
+    "verified": false,
+    "mutations": 2,
+    "nudges": 1,
+    "parallel_batches": 0,
+    "seconds": 12.8
+  },
+  {
+    "task": "pure_add_item",
+    "config": "unverifiable",
+    "repeat": 1,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 12,
+    "calls": 12,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 64579,
+    "completion_tokens": 3376,
+    "cost": 0.002662,
+    "verified": false,
+    "mutations": 2,
+    "nudges": 1,
+    "parallel_batches": 2,
+    "seconds": 26.9
+  },
+  {
+    "task": "numeric_ids",
+    "config": "unverifiable",
+    "repeat": 0,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 9,
+    "calls": 9,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 41578,
+    "completion_tokens": 2621,
+    "cost": 0.001995,
+    "verified": false,
+    "mutations": 1,
+    "nudges": 1,
+    "parallel_batches": 1,
+    "seconds": 15.3
+  },
+  {
+    "task": "numeric_ids",
+    "config": "unverifiable",
+    "repeat": 1,
+    "passed": true,
+    "detail": "exit=0 out='ok'",
+    "outcome": "completed",
+    "turns": 12,
+    "calls": 12,
+    "errors_by_tag": {
+      "policy_denied": 4
+    },
+    "prompt_tokens": 70144,
+    "completion_tokens": 4026,
+    "cost": 0.003134,
+    "verified": false,
+    "mutations": 4,
+    "nudges": 1,
+    "parallel_batches": 1,
+    "seconds": 23.0
+  }
+]

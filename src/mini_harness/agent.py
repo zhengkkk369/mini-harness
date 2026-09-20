@@ -7,7 +7,7 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 
 from mini_harness.config import CONFIG
-from mini_harness.budget import Budget, STOP_WALL
+from mini_harness.budget import Budget, STOP_WALL, cached_tokens
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
@@ -164,17 +164,22 @@ class DeepSeekAgent:
         by_tool = {}
         budget = Budget.from_config(cfg, started = start)
 
-        def record_usage(usage) -> None:
-            """Fold one response's usage into the totals, the budget and the trace."""
+        def record_usage(usage) -> int:
+            """Fold one response's usage into the totals, the budget and the trace.
+
+            Returns this response's cached input count, which is what a per-turn
+            event should carry; only run_end reports the cumulative figure.
+            """
             nonlocal last_prompt, prompt_total, completion_total
             prompt = getattr(usage, 'prompt_tokens', 0) or 0
             completion = getattr(usage, 'completion_tokens', 0) or 0
+            cached = cached_tokens(usage)
             self.last_prompt_tokens = prompt
             last_prompt = prompt
             prompt_total += prompt
             completion_total += completion
-            budget.add(prompt, completion)
-            return
+            budget.add(prompt, completion, cached)
+            return cached
 
         try:
             for turn in range(cfg.max_turns_main):
@@ -200,20 +205,21 @@ class DeepSeekAgent:
                         'role': 'assistant', 'content': truncated + note,
                         'reasoning_content': self.last_reasoning
                     })
-                    if self.last_usage is not None:
-                        record_usage(self.last_usage)
+                    cached = record_usage(self.last_usage) if self.last_usage is not None else 0
                     out_tokens = getattr(self.last_usage, 'completion_tokens', 0) or 0
                     print(f'[ctx]: {last_prompt} / {cfg.compact_limit} tokens, out {out_tokens} [TRUNCATED]')
                     TRACE.emit('usage', turn = turns, prompt = last_prompt, completion = out_tokens,
-                               total = budget.tokens, cost = round(budget.cost, 6), truncated = True)
+                               total = budget.tokens, cached = cached,
+                               cost = round(budget.cost, 6), truncated = True)
                     self._save_memory(quiet=True)
                     continue
                 if response.usage:
-                    record_usage(response.usage)
+                    cached = record_usage(response.usage)
                     print(f'[ctx]: {last_prompt} / {cfg.compact_limit} tokens, out {response.usage.completion_tokens}')
                     TRACE.emit('usage', turn = turns, prompt = response.usage.prompt_tokens,
                                completion = response.usage.completion_tokens, total = budget.tokens,
-                               cost = round(budget.cost, 6), truncated = False)
+                               cached = cached, cost = round(budget.cost, 6),
+                               truncated = False)
                 message = response.choices[0].message
                 if message.tool_calls:
                     print()
@@ -297,6 +303,7 @@ class DeepSeekAgent:
         TRACE.emit('run_end', outcome = outcome, turns = turns, calls = calls, ok = ok,
                    failed_by_tag = by_tag, calls_by_tool = by_tool,
                    prompt_tokens = prompt_total, completion_tokens = completion_total,
+                   cached_tokens = budget.cached_tokens,
                    cost = round(budget.cost, 6), stopped_by = stopped_by,
                    verified = verified, mutations = mutated, nudges = nudges,
                    wall = round(result.wall, 4), err = err)

@@ -71,6 +71,23 @@ def tail(text: str, limit: int = 240) -> str:
     return ' '.join(text.split())[:limit]
 
 
+def trace_counts(path: Path) -> dict:
+    """Count the events a run emitted, so the mechanism is visible per run."""
+    counts = {}
+    if not path.exists():
+        return counts
+    for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        name = event.get('event')
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
 # --------------------------------------------------------------------------- tasks
 
 
@@ -212,6 +229,86 @@ def check_queue(sandbox: Path, answer: str):
     return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
 
 
+def setup_normalize(sandbox: Path) -> None:
+    """The contract is prose only: the checker is not in the sandbox."""
+    write(sandbox, 'normalize.py',
+          'def normalize(text):\n'
+          '    """Return the text lowercased, without leading or trailing space."""\n'
+          '    return text.lower()\n')
+
+
+def check_normalize(sandbox: Path, answer: str):
+    code, out = run_python(
+        sandbox,
+        'from normalize import normalize\n'
+        'assert normalize("  Hello   World  ") == "hello world", normalize("  Hello   World  ")\n'
+        'assert normalize("A\\t\\tB") == "a b", repr(normalize("A\\t\\tB"))\n'
+        'assert normalize("already fine") == "already fine"\n'
+        'assert normalize("") == ""\n'
+        'print("ok")\n')
+    return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
+
+
+def setup_bounds(sandbox: Path) -> None:
+    write(sandbox, 'bounds.py',
+          'def page_bounds(page, size):\n'
+          '    """Bounds of one page of results."""\n'
+          '    return (page * size, page * size + size)\n')
+
+
+def check_bounds(sandbox: Path, answer: str):
+    code, out = run_python(
+        sandbox,
+        'from bounds import page_bounds\n'
+        'assert page_bounds(1, 10) == (1, 10), page_bounds(1, 10)\n'
+        'assert page_bounds(2, 10) == (11, 20), page_bounds(2, 10)\n'
+        'assert page_bounds(3, 5) == (11, 15), page_bounds(3, 5)\n'
+        'print("ok")\n')
+    return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
+
+
+def setup_pure_add(sandbox: Path) -> None:
+    write(sandbox, 'basket.py',
+          'def add_item(items, item):\n'
+          '    """Return a basket containing item as well."""\n'
+          '    items.append(item)\n'
+          '    return items\n')
+
+
+def check_pure_add(sandbox: Path, answer: str):
+    code, out = run_python(
+        sandbox,
+        'from basket import add_item\n'
+        'original = ["apple"]\n'
+        'result = add_item(original, "pear")\n'
+        'assert result == ["apple", "pear"], result\n'
+        'assert original == ["apple"], f"the argument was mutated: {original}"\n'
+        'assert result is not original, "the same list came back"\n'
+        'print("ok")\n')
+    return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
+
+
+def setup_id_sort(sandbox: Path) -> None:
+    write(sandbox, 'ids.py',
+          'def sort_ids(ids):\n'
+          '    """Sort identifiers."""\n'
+          '    return sorted(ids)\n')
+
+
+def check_id_sort(sandbox: Path, answer: str):
+    code, out = run_python(
+        sandbox,
+        'from ids import sort_ids\n'
+        'assert sort_ids(["10", "9", "2"]) == ["2", "9", "10"], sort_ids(["10", "9", "2"])\n'
+        'assert sort_ids(["b", "a"]) == ["a", "b"]\n'
+        # the mixed case must be settled by the spec, because both readings of\n
+        # "2 before 9 before 10" agree on the two cases above\n
+        'assert sort_ids(["10", "2", "a"]) == ["10", "2", "a"], sort_ids(["10", "2", "a"])\n'
+        'assert sort_ids([]) == []\n'
+        'print("ok")\n')
+    return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
+
+
 TASKS = [
     Task('fix_syntax',
          'sandbox/report.py does not even run because of a syntax error on the `total` '
@@ -248,12 +345,40 @@ TASKS = [
          'empty queue raises instead of returning None. Fix both so that '
          '`python check_queue.py` prints ok.',
          setup_queue, check_queue),
+    # The four below state their contract in prose and ship no checker, so
+    # whether the code ever runs is entirely up to the model.
+    Task('normalize_whitespace',
+         'sandbox/normalize.py should return its input lowercased with leading and '
+         'trailing whitespace removed, and with any run of whitespace inside replaced by '
+         'a single space. Implement that.',
+         setup_normalize, check_normalize,
+         note='contract in prose only; no checker in the sandbox'),
+    Task('inclusive_bounds',
+         'sandbox/bounds.py computes the bounds of one page of results. The caller wants '
+         '1-based inclusive bounds: page 1 with size 10 is (1, 10), and page 2 with size '
+         '10 is (11, 20). Make it do that.',
+         setup_bounds, check_bounds,
+         note='contract in prose only; no checker in the sandbox'),
+    Task('pure_add_item',
+         'sandbox/basket.py add_item should return a new basket containing the item, and '
+         'must leave the list it was given untouched.',
+         setup_pure_add, check_pure_add,
+         note='contract in prose only; no checker in the sandbox'),
+    Task('numeric_ids',
+         'sandbox/ids.py sort_ids should order identifiers numerically when every one of '
+         'them is all digits, so 2 comes before 9 and 9 before 10. When any identifier is '
+         'not all digits, sort the whole list lexically instead. An empty list stays empty.',
+         setup_id_sort, check_id_sort,
+         note='contract in prose only; no checker in the sandbox'),
 ]
 
 CONFIGS = {
     'baseline': {},
     'no_verify': {'verify_required': False},
     'serial_tools': {'parallel_tools': False},
+    # The model cannot satisfy the nudge, so this measures what the mechanism
+    # does when its precondition holds and its remedy is unavailable.
+    'unverifiable': {'policy_deny_tools': ('run_bash', 'run_sandbox')},
 }
 
 
@@ -261,8 +386,8 @@ CONFIGS = {
 
 
 def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: float,
-            verbose: bool = False) -> dict:
-    run_dir = WORK / name / task.name
+            verbose: bool = False, repeat: int = 0) -> dict:
+    run_dir = WORK / name / f'{task.name}-r{repeat}'
     sandbox = run_dir / 'sandbox'
     shutil.rmtree(run_dir, ignore_errors=True)
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -293,9 +418,11 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
     except Exception as error:                       # a broken submission is a fail
         ok, detail = False, f'check raised {type(error).__name__}: {error}'
 
+    counts = trace_counts(run_dir / 'trace.jsonl')
     return {
         'task': task.name,
         'config': name,
+        'repeat': repeat,
         'passed': bool(ok),
         'detail': detail,
         'outcome': result.outcome,
@@ -307,6 +434,8 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         'cost': round(result.cost, 6),
         'verified': result.verified,
         'mutations': result.mutations,
+        'nudges': counts.get('verify_nudge', 0),
+        'parallel_batches': counts.get('batch_parallel', 0),
         'seconds': round(elapsed, 1),
     }
 
@@ -316,30 +445,44 @@ def render(rows: list) -> str:
     for row in rows:
         by_config.setdefault(row['config'], []).append(row)
 
-    lines = ['# mini-bench', '', '| config | task | pass | turns | calls | tokens | cost | verified | s |',
-             '| --- | --- | :-: | ---: | ---: | ---: | ---: | :-: | ---: |']
+    lines = ['# mini-bench', '',
+             '| config | task | pass | turns (median) | verified | nudges | parallel |',
+             '| --- | --- | :-: | ---: | :-: | ---: | ---: |']
     for name, group in by_config.items():
+        tasks = {}
         for row in group:
-            tokens = row['prompt_tokens'] + row['completion_tokens']
-            lines.append(f"| {name} | {row['task']} | {'yes' if row['passed'] else 'NO'} | "
-                         f"{row['turns']} | {row['calls']} | {tokens} | ${row['cost']:.4f} | "
-                         f"{'yes' if row['verified'] else 'no'} | {row['seconds']} |")
-    lines += ['', '| config | passed | rate | median turns | total tokens | total cost |',
-              '| --- | ---: | ---: | ---: | ---: | ---: |']
+            tasks.setdefault(row['task'], []).append(row)
+        for task, runs in tasks.items():
+            passed = sum(1 for r in runs if r['passed'])
+            turns = sorted(r['turns'] for r in runs)
+            # verified means "no edit is left unverified", which is vacuously
+            # true for a run that edited nothing. Say so rather than implying
+            # the work was checked.
+            edited = [r for r in runs if r['mutations'] > 0]
+            verified = ('n/a' if not edited
+                        else f"{sum(1 for r in edited if r['verified'])}/{len(edited)}")
+            nudges = sum(r['nudges'] for r in runs)
+            parallel = sum(r['parallel_batches'] for r in runs)
+            lines.append(f"| {name} | {task} | {passed}/{len(runs)} | "
+                         f"{turns[len(turns) // 2]} | {verified} | "
+                         f"{nudges} | {parallel} |")
+
+    lines += ['', '| config | passed | rate | runs | nudges | total tokens | total cost |',
+              '| --- | ---: | ---: | ---: | ---: | ---: | ---: |']
     for name, group in by_config.items():
         passed = sum(1 for r in group if r['passed'])
-        turns = sorted(r['turns'] for r in group)
-        median = turns[len(turns) // 2] if turns else 0
         tokens = sum(r['prompt_tokens'] + r['completion_tokens'] for r in group)
         cost = sum(r['cost'] for r in group)
-        lines.append(f"| {name} | {passed}/{len(group)} | {passed / len(group):.0%} | {median} | "
-                     f"{tokens} | ${cost:.4f} |")
+        nudges = sum(r['nudges'] for r in group)
+        lines.append(f"| {name} | {passed}/{len(group)} | {passed / len(group):.0%} | "
+                     f"{len(group)} | {nudges} | {tokens} | ${cost:.4f} |")
+
     lines += ['', '## failures', '']
     failures = [r for r in rows if not r['passed']]
     if failures:
         for row in failures:
-            lines.append(f"- **{row['config']}/{row['task']}**: {row['detail']} "
-                         f"(outcome {row['outcome']}, {row['turns']} turns)")
+            lines.append(f"- **{row['config']}/{row['task']}** r{row['repeat']}: "
+                         f"{row['detail']} (outcome {row['outcome']}, {row['turns']} turns)")
     else:
         lines.append('none')
     return '\n'.join(lines) + '\n'
@@ -352,8 +495,11 @@ def main() -> int:
     parser.add_argument('--tasks', action='append', default=None, help='task name (repeatable)')
     parser.add_argument('--turns', type=int, default=30)
     parser.add_argument('--timeout', type=float, default=240.0, help='wall budget per run, seconds')
+    parser.add_argument('--repeats', type=int, default=1, help='runs per task and configuration')
     parser.add_argument('--price-in', type=float, default=None, help='dollars per million prompt tokens')
     parser.add_argument('--price-out', type=float, default=None, help='dollars per million output tokens')
+    parser.add_argument('--price-cache-in', type=float, default=None,
+                        help='dollars per million cached prompt tokens; unset bills them at --price-in')
     parser.add_argument('--verbose', action='store_true', help='do not silence the agent')
     args = parser.parse_args()
 
@@ -365,16 +511,20 @@ def main() -> int:
         for overrides in configs.values():
             overrides['price_in'] = args.price_in
             overrides['price_out'] = args.price_out
+            if args.price_cache_in is not None:
+                overrides['price_cache_in'] = args.price_cache_in
 
     rows = []
     for name, overrides in configs.items():
         for task in tasks:
-            print(f'running {name}/{task.name} ...', flush=True)
-            row = run_one(task, name, overrides, args.turns, args.timeout, args.verbose)
-            rows.append(row)
-            print(f'  -> {"pass" if row["passed"] else "FAIL"} in {row["seconds"]}s, '
-                  f'{row["turns"]} turns, {row["calls"]} calls | {row["detail"]}', flush=True)
-            Path(args.out).write_text(json.dumps(rows, indent=2) + '\n', encoding='utf-8')
+            for repeat in range(args.repeats):
+                print(f'running {name}/{task.name} r{repeat + 1}/{args.repeats} ...', flush=True)
+                row = run_one(task, name, overrides, args.turns, args.timeout, args.verbose, repeat)
+                rows.append(row)
+                print(f'  -> {"pass" if row["passed"] else "FAIL"} in {row["seconds"]}s, '
+                      f'{row["turns"]} turns, {row["calls"]} calls, {row["nudges"]} nudges '
+                      f'| {row["detail"]}', flush=True)
+                Path(args.out).write_text(json.dumps(rows, indent=2) + '\n', encoding='utf-8')
 
     report = render(rows)
     print()

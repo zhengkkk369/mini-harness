@@ -59,8 +59,11 @@ class Config:
     api_key_env: str = 'DEEPSEEK_API_KEY'
     reasoning_effort: str|None = None
 
-    model_main: str = 'deepseek-v4-flash'
-    model_sub: str = 'deepseek-v4-flash'
+    # 'deepseek-v4-flash' is the legacy spelling of this model. The provider
+    # still accepts it and serves the same weights at the same price, but the
+    # current name is deepseek-flash.
+    model_main: str = 'deepseek-flash'
+    model_sub: str = 'deepseek-flash'
     base_url: str = 'https://api.deepseek.com'
     max_turns_main: int = 50
     max_turns_sub: int = 20
@@ -94,6 +97,7 @@ class Config:
     cost_budget: float|None = None
     price_in: float|None = None
     price_out: float|None = None
+    price_cache_in: float|None = None
 
     # Tool execution. A batch runs concurrently only when every call is
     # side-effect free, so read-only batches are the only ones that overlap.
@@ -374,7 +378,7 @@ def build_config() -> Config:
             if int(value) <= 0:
                 raise ValueError(f'{name} must be positive')
             overrides[name] = int(value)
-    for name in ('wall_budget', 'cost_budget', 'price_in', 'price_out'):
+    for name in ('wall_budget', 'cost_budget', 'price_in', 'price_out', 'price_cache_in'):
         if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
             if float(value) <= 0:
                 raise ValueError(f'{name} must be positive')

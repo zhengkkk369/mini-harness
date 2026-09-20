@@ -61,7 +61,7 @@ class MiniHarnessAgent(BaseInstalledAgent):
         if model is not None and not model.strip():
             raise ValueError("model_name must not be empty")
         self._model_id = model or (
-            "gpt-4.1" if provider == "openai" else "deepseek-v4-flash"
+            "gpt-4.1" if provider == "openai" else "deepseek-flash"
         )
         key_env = (
             api_key_env

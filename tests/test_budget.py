@@ -1,8 +1,10 @@
 """Budget arithmetic and the stop decision."""
 
+from types import SimpleNamespace
+
 import pytest
 
-from mini_harness.budget import Budget, STOP_COST, STOP_TOKENS, STOP_WALL
+from mini_harness.budget import Budget, STOP_COST, STOP_TOKENS, STOP_WALL, cached_tokens
 
 
 def test_tokens_accumulate_across_calls():
@@ -79,3 +81,75 @@ def test_from_config_reads_every_budget_field(cfg_factory):
 
 def test_from_config_can_pin_the_start_time(cfg_factory):
     assert Budget.from_config(cfg_factory(), started=1.0).started == 1.0
+
+
+# --------------------------------------------------------------------------- cached input
+
+
+def test_cached_input_is_billed_at_the_cache_rate():
+    budget = Budget(price_in=1.0, price_out=0.0, price_cache_in=0.1)
+
+    budget.add(1_000_000, 0, cached_tokens=1_000_000)
+
+    assert budget.cost == pytest.approx(0.1)
+
+
+def test_without_a_cache_price_cached_input_is_billed_in_full():
+    """Unset must mean conservative: an upper bound, never an undercount."""
+    budget = Budget(price_in=1.0, price_out=0.0)
+
+    budget.add(1_000_000, 0, cached_tokens=1_000_000)
+
+    assert budget.cost == pytest.approx(1.0)
+
+
+def test_only_the_uncached_part_pays_the_full_rate():
+    budget = Budget(price_in=1.0, price_out=0.0, price_cache_in=0.0)
+
+    budget.add(1_000_000, 0, cached_tokens=400_000)
+
+    assert budget.cost == pytest.approx(0.6)
+
+
+def test_cached_tokens_accumulate_and_are_rendered():
+    budget = Budget(price_in=1.0, price_out=0.0, price_cache_in=0.5)
+    budget.add(100, 0, cached_tokens=40)
+    budget.add(100, 0, cached_tokens=60)
+
+    assert budget.cached_tokens == 100
+    assert '100 cached' in budget.render()
+
+
+def test_cached_cannot_exceed_the_prompt():
+    budget = Budget()
+    budget.add(10, 0, cached_tokens=999)
+    assert budget.cached_tokens == 10
+
+
+def test_from_config_reads_the_cache_price(cfg_factory):
+    assert Budget.from_config(cfg_factory(price_cache_in=0.05)).price_cache_in == 0.05
+
+
+def test_cached_tokens_reads_the_openai_shape():
+    usage = SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=7))
+    assert cached_tokens(usage) == 7
+
+
+def test_cached_tokens_reads_the_deepseek_shape():
+    assert cached_tokens(SimpleNamespace(prompt_cache_hit_tokens=9)) == 9
+
+
+def test_cached_tokens_prefers_the_nested_shape():
+    usage = SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=7),
+                            prompt_cache_hit_tokens=9)
+    assert cached_tokens(usage) == 7
+
+
+@pytest.mark.parametrize('usage', [None, SimpleNamespace()])
+def test_cached_tokens_is_zero_when_absent(usage):
+    assert cached_tokens(usage) == 0
+
+
+def test_cached_tokens_survives_a_nonsense_value():
+    assert cached_tokens(SimpleNamespace(prompt_cache_hit_tokens='nonsense')) == 0
+    assert cached_tokens(SimpleNamespace(prompt_cache_hit_tokens=-5)) == 0
