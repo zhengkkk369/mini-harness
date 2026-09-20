@@ -16,6 +16,10 @@
 
 - **Small, but complete.** About 1,700 lines of Python: nine tools, context
   compaction, request retries, streaming responses, and session memory.
+- **Tested offline.** `uv run pytest` runs 162 tests with no network, no API key
+  and no Docker. They cover the agent loop, the tool executor's file-state
+  gates, the nine tools, context compaction, configuration and the sandbox
+  command builder.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
 - **A practical baseline.** Evaluated on SWE-bench Verified and Terminal-Bench
@@ -143,6 +147,32 @@ For the plain terminal interface:
 ```sh
 uv run --locked mini-harness
 ```
+
+## Tests
+
+The suite is fully offline: it uses a dummy API key and fake model clients, so
+it runs in CI and on a laptop without credentials. No test requires Docker.
+
+```sh
+uv run --locked pytest
+```
+
+| File | Covers |
+| --- | --- |
+| `tests/test_agent.py` | the turn loop, outcomes, truncation recovery, memory, telemetry, CLI exit codes |
+| `tests/test_executor.py` | argument validation, duplicate calls, approvals, and the read/stale/overwrite file gates |
+| `tests/test_tools.py` | glob, grep, read, write, edit and run_bash behaviour, including the environment filter |
+| `tests/test_path.py` | read/write path guards and the sensitive-file deny list |
+| `tests/test_compact.py` | cut-point selection, the summary prompt, and the compaction audit log |
+| `tests/test_config.py` | provider inference, environment overrides, and the bench profile |
+| `tests/test_sandbox.py` | the Docker command line, isolation flags, mount scope, and cleanup |
+
+Two environment notes. `run_bash` spawns a real shell, so its tests record the
+subprocess call rather than capturing a child's output, which keeps them
+working in environments that forbid pipes. Temporary directories are created
+under `.pytest-work/` by the `workspace` and `session_dir` fixtures instead of
+pytest's `tmp_path`, because some sandboxes make `mkdtemp` directories
+read-only.
 
 ## Benchmark adapters
 

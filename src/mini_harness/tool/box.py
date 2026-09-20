@@ -146,6 +146,7 @@ class ToolExecution:
     def __init__(self, regis: dict, confirm: Callable, cfg = CONFIG) -> None:
         self.regis = regis
         self.confirm = confirm
+        self.cfg = cfg
         self.last_tool = None
         self.files = {}
         return
@@ -275,7 +276,9 @@ class ToolExecution:
         self.last_tool = current
         
         try:
-            result = funs(args)
+            # Pass the config through: without it every tool would fall back to
+            # the module-level CONFIG and ignore the caller's workspace.
+            result = funs(args, cfg = cfg)
         except Exception as e:
             return ToolItem(f'[{TAG.EXECUTE_FAILED}]: the tool execute failed: {type(e).__name__}: {e}', False, f'{TAG.EXECUTE_FAILED}:{type(e).__name__}')
 
@@ -372,8 +375,10 @@ def grep_file(inp: GrepFileInput, cfg = CONFIG) -> str:
                             break
         except (OSError, UnicodeDecodeError):
             continue
-        if truncated:
-            hits.append(f'\n..... truncated at {cfg.max_hits}')
+    if truncated:
+        # The cap is reached here, not inside the loop, so the notice has to be
+        # appended after it: the agent must not read a capped result as complete.
+        hits.append(f'[grep truncated at {cfg.max_hits} hits, there may be more matches]')
     return '\n'.join(hits) if hits else 'no matches'
 
 
@@ -532,12 +537,15 @@ def run_sandbox(inp: RunSandboxInput, cfg = CONFIG) -> str:
         ' print("[sandbox command timed out]",flush=True)\n'
         ' sys.exit(124)\n'
     )
+    identity = []
+    if os.name == 'posix':
+        identity = ['--user', f'{os.getuid()}:{os.getgid()}']
     command = [
         docker, 'run', '--rm', '--pull=never', '--name', name,
         '--label', 'mini-harness.sandbox=true', '--network=none', '--read-only',
         '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=64',
         '--memory=256m', '--memory-swap=256m', '--cpus=1', '--log-driver=none',
-        '--ulimit', 'fsize=16777216:16777216', '--user', f'{os.getuid()}:{os.getgid()}',
+        '--ulimit', 'fsize=16777216:16777216', *identity,
         '--tmpfs', '/tmp:rw,nosuid,nodev,size=64m,mode=1777',
         '--mount', f'type=bind,src={workspace},dst=/workspace', '--workdir', '/workspace',
         '--env', 'HOME=/tmp', '--env', 'PYTHONDONTWRITEBYTECODE=1',

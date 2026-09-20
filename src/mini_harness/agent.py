@@ -309,10 +309,10 @@ class DeepSeekAgent:
             result = self._run_turn(client, executer, cfg = cfg)
             self._save_memory(quiet=True)
             print(
-                f'[outcome]: {result.outcome}, [calls]: {result.calls}, [turns]: {result.turns}, [ok]: {result.ok}'
-                f'[calls_tool]: {result.calls_by_tool}, [failed]: {result.failed_by_tag}'
-                f'[last_prompt]: {result.last_prompt}, [last_prompt_tokens]: {result.prompt_total}, [completion_tokens]: {result.completion_total}'
-                f'[wall]: {result.wall}'
+                f'[outcome]: {result.outcome}, [calls]: {result.calls}, [turns]: {result.turns}, [ok]: {result.ok}, '
+                f'[calls_tool]: {result.calls_by_tool}, [failed]: {result.failed_by_tag}, '
+                f'[last_prompt]: {result.last_prompt}, [last_prompt_tokens]: {result.prompt_total}, [completion_tokens]: {result.completion_total}, '
+                f'[wall]: {result.wall:.1f}s, '
                 f'[err]: {result.err}'
             )
         return

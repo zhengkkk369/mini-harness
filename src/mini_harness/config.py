@@ -2,7 +2,7 @@ import os
 import fnmatch
 
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dotenv import find_dotenv, load_dotenv
 
 from mini_harness.bench_profile import BENCH_OVERRIDE
@@ -15,7 +15,10 @@ def default_workspace() -> Path:
 
 @dataclass(frozen = True)
 class Config:
-    work_space: Path = default_workspace()
+    # default_factory, not a direct call: a direct call would freeze the
+    # workspace at import time and ignore the environment passed to
+    # build_config().
+    work_space: Path = field(default_factory = default_workspace)
     profile: str = 'local'
     provider: str = 'deepseek'
     api_key_env: str = 'DEEPSEEK_API_KEY'
@@ -277,21 +280,23 @@ def build_config() -> Config:
         if not model.strip():
             raise ValueError('MINI_HARNESS_MODEL must not be empty')
         overrides.update(model_main=model, model_sub=model)
-    for env_name, field in {
+    for env_name, field_name in {
         'MINI_HARNESS_BASE_URL': 'base_url',
         'MINI_HARNESS_SUB_MODEL': 'model_sub',
         'MINI_HARNESS_REASONING_EFFORT': 'reasoning_effort',
     }.items():
         if value := os.environ.get(env_name):
-            overrides[field] = value
+            overrides[field_name] = value
+    if workspace := os.environ.get('MINI_HARNESS_WORK_SPACE'):
+        overrides['work_space'] = Path(workspace).resolve()
     if overrides.get('reasoning_effort') and provider == 'openai':
         overrides.update(think_main=overrides['reasoning_effort'],
                          think_sub=overrides['reasoning_effort'])
-    for field in ('max_tokens_main', 'max_tokens_sub', 'compact_limit'):
-        if value := os.environ.get(f'MINI_HARNESS_{field.upper()}'):
+    for name in ('max_tokens_main', 'max_tokens_sub', 'compact_limit'):
+        if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
             if int(value) <= 0:
-                raise ValueError(f'{field} must be positive')
-            overrides[field] = int(value)
+                raise ValueError(f'{name} must be positive')
+            overrides[name] = int(value)
     sub_model = overrides.get('model_sub')
     if sub_model and sub_model.partition('/')[0] in {'openai', 'deepseek'}:
         prefix, _, name = sub_model.partition('/')

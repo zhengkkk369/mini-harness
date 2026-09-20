@@ -10,6 +10,12 @@ __pycache__/
 .cache/
 .ruff_cache/
 .pytest_cache/
+.pytest-tmp/
+.pytest-work/
+pytest-cache-files-*/
+.probe/
+.pt2/
+.tmp-alt/
 .coverage
 htmlcov/
 
@@ -27,5 +33,3 @@ sandbox/
 jobs/
 *.tar.gz
 .DS_Store
-/test/
-/tests/

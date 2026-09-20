@@ -12,7 +12,9 @@ class CompactContent:
         pass
 
     def _get_cut(self, message: list, cfg = CONFIG) -> int:
-        cut = len(message) - cfg.recent_keep
+        # Always a valid index: at most the last message, at least the system
+        # message, and never a tool result (its assistant call must come too).
+        cut = max(1, min(len(message) - cfg.recent_keep, len(message) - 1))
         while cut > 1 and message[cut]['role'] == 'tool':
             cut -= 1
         return cut

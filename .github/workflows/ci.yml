@@ -33,8 +33,10 @@ jobs:
         run: uv sync --locked
       - name: Check source
         run: |
-          uv run --locked ruff check src tui.py
-          uv run --locked python -m compileall -q src
+          uv run --locked ruff check src tests tui.py
+          uv run --locked python -m compileall -q src tests
+      - name: Run the offline test suite
+        run: uv run --locked pytest
       - name: Check imports, tool schemas, and CLI offline
         run: |
           uv run --locked python -c "from mini_harness.agent import DeepSeekAgent; from mini_harness.tool.box import TOOLS; assert len(DeepSeekAgent(TOOLS).tools) == 9"

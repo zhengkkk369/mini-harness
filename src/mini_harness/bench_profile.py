@@ -1,4 +1,14 @@
+"""Unattended, guard-free configuration used when running under a benchmark.
+
+The session file name is part of the contract with the trajectory builder
+(``bench/atif.py``), which reads ``mini_harness_session.json`` from the run's
+agent log directory. Only the directory is configurable.
+"""
+
 import os
+
+SESSION_NAME = 'mini_harness_session.json'
+
 
 def _wall_from_env() -> float:
     raw = os.environ.get("MINI_HARNESS_WALL_BUDGET", 1400.0)
@@ -7,7 +17,16 @@ def _wall_from_env() -> float:
         return v if v > 0 else 1400.0
     except (TypeError, ValueError):
         return 1400.0
-    
+
+
+def _log_dir() -> str:
+    # Harbor mounts its run logs at /logs/agent. Other runners can point this
+    # somewhere writable so the profile also works off Linux.
+    return os.environ.get('MINI_HARNESS_LOG_DIR') or '/logs/agent'
+
+
+def session_path() -> str:
+    return f'{_log_dir().rstrip("/")}/{SESSION_NAME}'
 
 
 BENCH_PROMPT: str = '''
@@ -113,7 +132,7 @@ BENCH_OVERRIDE: dict = {
     'wall_budget': None,
     'guard_read': False,
     'guard_write': False,
-    'session_path': '/logs/agent/mini_harness_session.json',
+    'session_path': session_path(),
     'deny_name': (),
     'deny_dir': frozenset(),
     'bash_env_deny': ('DEEPSEEK_API_KEY',),
