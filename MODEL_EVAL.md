@@ -158,24 +158,75 @@ Two findings worth keeping:
 
 No retries fired in any run, so the backoff path was not exercised.
 
-## 3. Harbor and SWE-bench Verified: attempted, not completed
+## 3. Harbor and SWE-bench Verified: one task, not solved
 
 The repository's documented benchmark path is Harbor against SWE-bench Verified.
-What actually happened:
+It ran end to end on this machine — one task, as a smoke test:
+
+```sh
+PYTHONPATH=.;.experiments/pyshim uv run --with harbor==0.20.0 harbor run \
+  -d swebench-verified --agent bench.adapter:MiniHarnessAgent \
+  --model deepseek/deepseek-v4-flash --env docker --n-tasks 1 --n-concurrent 1 --yes
+```
 
 | step | outcome |
 | --- | --- |
-| Install Harbor 0.20.0 | worked (`uv run --with harbor==0.20.0`) |
+| Install Harbor 0.20.0 | worked |
 | CLI flags match the README | verified against `harbor run --help` |
 | Registry query | initially failed with the same `InvalidURL`; worked after the `sitecustomize` fix |
 | Dataset resolution | worked — selected `astropy__astropy-7606` |
-| Trial created | worked |
-| Environment build / agent run | **still in progress when this was written**; no container image present, `trial.log` empty, ~3.8 GB consumed |
+| Environment build | worked — a 4.18 GB image |
+| Agent install inside the container | worked (`uv tool install` over the network) |
+| Agent run | completed, 79.6 s |
+| Verifier | ran, **FAILED** |
+| **Reward** | **0 / 1** |
 
-So the job got past dependency install, the registry, and dataset resolution, and
-stopped in the Docker environment phase. No SWE-bench score was produced, and
-nothing here should be read as one. The recorded job directory is under `jobs/`,
-which the repository ignores.
+### The agent's run, from its own telemetry
+
+| | |
+| --- | --- |
+| outcome | `completed` |
+| turns / calls / failures | 17 / 17 / 0 |
+| tools | `run_bash` 8, `read_file` 4, `grep_file` 3, `edit_file` 2 |
+| prompt tokens | 120,127 (last request 9,725) |
+| completion tokens | 2,599 |
+| wall | 79.6 s |
+| verified / mutations | true / 2 |
+| stopped by | nothing — it stopped on its own with 283 turns still available |
+
+The trace written by the benchmark run holds 70 events (`run_start`, 17 ×
+`turn`, 17 × `usage`, 17 × `tool_call`, 17 × `tool_result`, `run_end`), so the
+event trace added earlier in this project works in the real evaluation flow, not
+just in tests. The `verified` and `mutations` fields also survive into Harbor's
+telemetry.
+
+So the agent ran cleanly, made two edits, ran commands to check its work, and
+still did not pass the task's FAIL_TO_PASS tests. That is what a 0 on a
+SWE-bench task looks like from the harness side: no crash, no error tag, no
+budget stop, just an incorrect patch.
+
+### A last environment defect
+
+Harbor's CLI **crashed after the trial finished**, while printing the summary
+table:
+
+```
+UnicodeEncodeError: 'gbk' codec can't encode character '\u2022'
+```
+
+rich's legacy Windows renderer writes to a GBK console and cannot emit the
+bullet rich puts in its table title. The trial had already been written to disk,
+so the result survives; only the console summary is lost. It is a Harbor/rich
+issue on a non-UTF-8 Windows console, not something this repository controls —
+but it is why a run can look like a failure while having succeeded.
+
+### What this is not
+
+**One task is not a score.** The repository's historical numbers are 401/500 on
+SWE-bench Verified; a single task says nothing about that, and this result must
+not be read as a regression against it. Nothing here is comparable to it: same
+model name, but a different source revision, a different day, and one sampled
+task instead of 500.
 
 ## Limitations
 
@@ -195,6 +246,9 @@ which the repository ignores.
   standardised benchmark and are not comparable to SWE-bench or Terminal-Bench.
 - **One model, one machine, one day.** No repetition across time, and no second
   model to compare against.
+- **The SWE-bench figure is a single task.** 0/1 is an anecdote that shows the
+  pipeline works end to end; it is not a score and does not compare to the
+  401/500 recorded in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Reproducing
 
