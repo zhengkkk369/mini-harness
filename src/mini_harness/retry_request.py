@@ -6,6 +6,7 @@ from typing import Callable
 from httpx import RemoteProtocolError
 
 from mini_harness.config import CONFIG
+from mini_harness.trace import TRACE
 
 def retry_call(request_agent: Callable, cfg = CONFIG):
     for attempt in range(max(cfg.max_retry, cfg.rate_retry)):
@@ -21,5 +22,7 @@ def retry_call(request_agent: Callable, cfg = CONFIG):
             if limited:
                 wait = min(wait, cfg.rate_cap)
             print(f'[retry]: the api connection lost: {type(e).__name__}, waiting for retry -- {attempt +1 }/{cfg.max_retry} -- {wait:.1f}s')
+            TRACE.emit('retry', attempt = attempt + 1, error = type(e).__name__,
+                       limited = limited, wait = round(wait, 2), allowed = allow)
             time.sleep(wait)
     raise ValueError(f'[invalid retries]: the max retry is invalid: {cfg.max_retry}')

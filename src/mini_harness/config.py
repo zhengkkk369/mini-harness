@@ -38,18 +38,27 @@ class Config:
     max_read_size: int = 512000
     max_hits: int = 200
     bash_timeout: int = 90
-    wall_budget: float|None = None
     read_limit: int = 60000
     bash_limit: int = 30000
     guard_read: bool = True
     guard_write: bool = True
     session_path: str|None = None
+    trace_path: str|None = None
     clip_limit: int = 80000
     track_files: bool = True
     edit_require_read: bool = True
     write_require_read: bool = True
     thrash_notice: int = 0
     diff_echo_lines: int = 40
+
+    # Run budgets. wall_budget is seconds, token_budget counts prompt plus
+    # completion tokens, cost_budget is US dollars. Cost is only tracked when
+    # both prices are set.
+    wall_budget: float|None = None
+    token_budget: int|None = None
+    cost_budget: float|None = None
+    price_in: float|None = None
+    price_out: float|None = None
 
     max_retry: int = 5
     retry_base: float = 2.0
@@ -292,11 +301,18 @@ def build_config() -> Config:
     if overrides.get('reasoning_effort') and provider == 'openai':
         overrides.update(think_main=overrides['reasoning_effort'],
                          think_sub=overrides['reasoning_effort'])
-    for name in ('max_tokens_main', 'max_tokens_sub', 'compact_limit'):
+    for name in ('max_tokens_main', 'max_tokens_sub', 'compact_limit', 'token_budget'):
         if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
             if int(value) <= 0:
                 raise ValueError(f'{name} must be positive')
             overrides[name] = int(value)
+    for name in ('wall_budget', 'cost_budget', 'price_in', 'price_out'):
+        if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
+            if float(value) <= 0:
+                raise ValueError(f'{name} must be positive')
+            overrides[name] = float(value)
+    if trace := os.environ.get('MINI_HARNESS_TRACE'):
+        overrides['trace_path'] = trace
     sub_model = overrides.get('model_sub')
     if sub_model and sub_model.partition('/')[0] in {'openai', 'deepseek'}:
         prefix, _, name = sub_model.partition('/')

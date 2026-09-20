@@ -16,12 +16,16 @@
 
 - **Small, but complete.** About 1,700 lines of Python: nine tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 162 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 258 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the nine tools, context compaction, configuration and the sandbox
   command builder.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
+  The definition contract is enforced in code, not just written in the prompt.
+- **Bounded and observable.** Optional token, cost and wall-clock budgets stop a
+  run before it gets expensive, and an opt-in JSONL [trace](src/mini_harness/trace.py)
+  records every turn, tool call, retry and compaction.
 - **A practical baseline.** Evaluated on SWE-bench Verified and Terminal-Bench
   2.1 with DeepSeek V4 Flash. See the results below.
 - **Built for learning.** Follow the [agent loop](src/mini_harness/agent.py),
@@ -90,6 +94,53 @@ Before dispatch, the [tool executor](src/mini_harness/tool/box.py) calls
 `model_validate_json()` to validate its arguments; invalid calls return an error
 for the agent to correct. One definition keeps the schema, validation, and
 execution connected. See the [Pydantic model documentation](https://docs.pydantic.dev/latest/concepts/models/).
+
+A `ToolDefinition` is checked when it is built, so a definition that breaks the
+contract fails at import instead of at dispatch:
+
+- `name` must be a valid API function name (letters, digits, `_`, `-`, up to 64).
+- `description` must be non-empty; it is the model's only documentation.
+- `parameters` must be a Pydantic `BaseModel` subclass.
+- `function` must accept the arguments model as its first parameter, and take
+  `cfg` as a normal keyword if it accepts it at all. Functions written as
+  `def tool(args)` and as `def tool(args, cfg=None)` both work; the definition
+  records which convention yours uses.
+
+`validate_tools()` adds the checks a single definition cannot make: names must
+be unique, the built-in read and write tools must be present, and any tool whose
+file bookkeeping keys on `file_path` must declare that field. Skipping the last
+rule is exactly how an edit gate silently stops gating.
+
+## Budgets and tracing
+
+A run stops for one of four reasons, and the reason is reported rather than
+guessed at: the model stopped calling tools (`completed`), the turn limit was
+reached (`exhausted`), a budget was spent (`timeout` for the wall clock,
+`budget` for tokens or cost), or something failed.
+
+Set any of these to bound a run. All are off by default:
+
+```sh
+export MINI_HARNESS_WALL_BUDGET=600      # seconds, checked before each request
+export MINI_HARNESS_TOKEN_BUDGET=500000  # prompt plus completion tokens
+export MINI_HARNESS_COST_BUDGET=2.50     # US dollars, needs both prices below
+export MINI_HARNESS_PRICE_IN=0.28        # dollars per million input tokens
+export MINI_HARNESS_PRICE_OUT=0.42       # dollars per million output tokens
+```
+
+Cost stays at zero unless both prices are set, so a token budget needs no
+pricing data. `Result` reports `cost` and which budget stopped the run, and the
+CLI turns a spent budget into exit code 5.
+
+Set `MINI_HARNESS_TRACE` to a path to record what the run actually did. The
+[trace](src/mini_harness/trace.py) is an append-only JSONL file, one object per
+event, with a monotonic `seq` and a `ts`: `run_start`, `turn`, `usage`,
+`tool_call`, `tool_result`, `retry`, `compact`, `subagent_start`,
+`subagent_end`, `run_end`. It is off by default and every emit is a no-op when
+it is off, so it costs nothing when unused. A write failure disables the trace
+instead of failing the run. The bench profile writes one next to its session
+file. The session file and the compaction audit log are unchanged: the trace is
+for observing a run, not for resuming it.
 
 ## Get started
 
@@ -166,6 +217,9 @@ uv run --locked pytest
 | `tests/test_compact.py` | cut-point selection, the summary prompt, and the compaction audit log |
 | `tests/test_config.py` | provider inference, environment overrides, and the bench profile |
 | `tests/test_sandbox.py` | the Docker command line, isolation flags, mount scope, and cleanup |
+| `tests/test_budget.py` | token, cost and wall-clock arithmetic and the stop decision |
+| `tests/test_trace.py` | the JSONL event log and retry backoff reporting |
+| `tests/test_contract.py` | the tool-definition and registry contracts |
 
 Two environment notes. `run_bash` spawns a real shell, so its tests record the
 subprocess call rather than capturing a child's output, which keeps them

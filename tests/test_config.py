@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from mini_harness.bench_profile import BENCH_OVERRIDE, SESSION_NAME, _log_dir, session_path
+from mini_harness.bench_profile import (
+    BENCH_OVERRIDE, SESSION_NAME, TRACE_NAME, _log_dir, session_path, trace_path,
+)
 from mini_harness.config import Config, build_config
 
 
@@ -16,6 +18,8 @@ def isolated_env(monkeypatch):
         "MINI_HARNESS_BASE_URL", "MINI_HARNESS_API_KEY_ENV", "MINI_HARNESS_PROFILE",
         "MINI_HARNESS_LOG_DIR", "MINI_HARNESS_WORK_SPACE", "MINI_HARNESS_REASONING_EFFORT",
         "MINI_HARNESS_MAX_TOKENS_MAIN", "MINI_HARNESS_MAX_TOKENS_SUB", "MINI_HARNESS_COMPACT_LIMIT",
+        "MINI_HARNESS_TOKEN_BUDGET", "MINI_HARNESS_COST_BUDGET", "MINI_HARNESS_WALL_BUDGET",
+        "MINI_HARNESS_PRICE_IN", "MINI_HARNESS_PRICE_OUT", "MINI_HARNESS_TRACE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -125,6 +129,52 @@ def test_workspace_can_be_pointed_elsewhere(monkeypatch, tmp_path):
     assert build_config().work_space == tmp_path.resolve()
 
 
+# --------------------------------------------------------------------------- budgets
+
+
+def test_budgets_default_to_disabled():
+    cfg = build_config()
+    assert (cfg.token_budget, cfg.cost_budget, cfg.wall_budget) == (None, None, None)
+    assert (cfg.price_in, cfg.price_out) == (None, None)
+    assert cfg.trace_path is None
+
+
+def test_token_budget_is_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_TOKEN_BUDGET", "50000")
+    assert build_config().token_budget == 50000
+
+
+@pytest.mark.parametrize("variable,field", [
+    ("MINI_HARNESS_WALL_BUDGET", "wall_budget"),
+    ("MINI_HARNESS_COST_BUDGET", "cost_budget"),
+    ("MINI_HARNESS_PRICE_IN", "price_in"),
+    ("MINI_HARNESS_PRICE_OUT", "price_out"),
+])
+def test_float_budgets_are_read_from_the_environment(monkeypatch, variable, field):
+    monkeypatch.setenv(variable, "1.25")
+    assert getattr(build_config(), field) == 1.25
+
+
+@pytest.mark.parametrize("variable", [
+    "MINI_HARNESS_TOKEN_BUDGET", "MINI_HARNESS_WALL_BUDGET",
+    "MINI_HARNESS_COST_BUDGET", "MINI_HARNESS_PRICE_IN", "MINI_HARNESS_PRICE_OUT",
+])
+def test_non_positive_budgets_are_rejected(monkeypatch, variable):
+    monkeypatch.setenv(variable, "0")
+    with pytest.raises(ValueError, match="must be positive"):
+        build_config()
+
+
+def test_trace_path_is_read_from_the_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("MINI_HARNESS_TRACE", str(tmp_path / "trace.jsonl"))
+    assert build_config().trace_path == str(tmp_path / "trace.jsonl")
+
+
+def test_an_empty_trace_variable_leaves_the_trace_off(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_TRACE", "")
+    assert build_config().trace_path is None
+
+
 # --------------------------------------------------------------------------- request shape
 
 
@@ -212,6 +262,13 @@ def test_bench_log_dir_tolerates_a_trailing_separator(monkeypatch):
     monkeypatch.setenv("MINI_HARNESS_LOG_DIR", "/logs/agent/")
     assert _log_dir() == "/logs/agent/"
     assert session_path() == "/logs/agent/mini_harness_session.json"
+    assert trace_path() == "/logs/agent/mini_harness_trace.jsonl"
+
+
+def test_bench_profile_traces_by_default():
+    """Benchmark runs should leave an event log next to the session file."""
+    assert TRACE_NAME == "mini_harness_trace.jsonl"
+    assert BENCH_OVERRIDE["trace_path"] == "/logs/agent/mini_harness_trace.jsonl"
 
 
 def test_bench_session_path_is_writable_on_this_host(monkeypatch, cfg_factory):

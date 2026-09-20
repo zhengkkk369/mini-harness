@@ -7,6 +7,8 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 
 from mini_harness.config import CONFIG
+from mini_harness.budget import Budget, STOP_WALL
+from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
 from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, _atomic_write, log_tool
@@ -26,6 +28,8 @@ class Result:
     completion_total: int
     wall: float
     err: str = ''
+    cost: float = 0.0
+    stopped_by: str = ''
 
 
 class DeepSeekAgent:
@@ -144,16 +148,36 @@ class DeepSeekAgent:
         outcome = OUTCOME.ERROR
         turns = calls = ok = last_prompt = prompt_total = completion_total = 0
         err = ''
+        stopped_by = ''
         by_tag = {}
         by_tool = {}
+        budget = Budget.from_config(cfg, started = start)
+
+        def record_usage(usage) -> None:
+            """Fold one response's usage into the totals, the budget and the trace."""
+            nonlocal last_prompt, prompt_total, completion_total
+            prompt = getattr(usage, 'prompt_tokens', 0) or 0
+            completion = getattr(usage, 'completion_tokens', 0) or 0
+            self.last_prompt_tokens = prompt
+            last_prompt = prompt
+            prompt_total += prompt
+            completion_total += completion
+            budget.add(prompt, completion)
+            return
+
         try:
             for turn in range(cfg.max_turns_main):
-                if cfg.wall_budget is not None and time.time() -start >= cfg.wall_budget:
-                    outcome = OUTCOME.TIMEOUT
-                    print(f'[timeout]: agent run out of the time in the task')
+                spent = budget.exceeded()
+                if spent is not None:
+                    stopped_by = spent
+                    outcome = OUTCOME.TIMEOUT if spent == STOP_WALL else OUTCOME.BUDGET
+                    print(f'[{spent} budget]: agent stopped at {budget.render()} (limits: {budget.limits()})')
+                    TRACE.emit('budget_stop', reason = spent, tokens = budget.tokens,
+                               cost = round(budget.cost, 6), elapsed = round(budget.elapsed, 4))
                     break
                 turns += 1
                 self.printed = ''
+                TRACE.emit('turn', turn = turns)
                 if self.last_prompt_tokens >= cfg.compact_limit:
                     self.message = COMPACT.compact_content(client, self.message, self.session_memory, cfg = cfg)
                     self._save_memory(quiet=True)
@@ -165,21 +189,20 @@ class DeepSeekAgent:
                         'role': 'assistant', 'content': truncated + note,
                         'reasoning_content': self.last_reasoning
                     })
-                    com_degree = self.last_usage
-                    if com_degree is not None:
-                        self.last_prompt_tokens = getattr(com_degree, 'prompt_tokens', 0) or 0
-                        last_prompt = self.last_prompt_tokens
-                        prompt_total += self.last_prompt_tokens
-                        completion_total += getattr(com_degree, 'completion_tokens', 0) or 0
-                    print(f'[ctx]: {last_prompt} / {cfg.compact_limit} tokens, out {getattr(com_degree, 'completion_tokens', 0)} [TRUNCATED]')
+                    if self.last_usage is not None:
+                        record_usage(self.last_usage)
+                    out_tokens = getattr(self.last_usage, 'completion_tokens', 0) or 0
+                    print(f'[ctx]: {last_prompt} / {cfg.compact_limit} tokens, out {out_tokens} [TRUNCATED]')
+                    TRACE.emit('usage', turn = turns, prompt = last_prompt, completion = out_tokens,
+                               total = budget.tokens, cost = round(budget.cost, 6), truncated = True)
                     self._save_memory(quiet=True)
                     continue
                 if response.usage:
-                    self.last_prompt_tokens = response.usage.prompt_tokens
-                    last_prompt = response.usage.prompt_tokens
-                    prompt_total += response.usage.prompt_tokens
-                    completion_total += response.usage.completion_tokens
+                    record_usage(response.usage)
                     print(f'[ctx]: {last_prompt} / {cfg.compact_limit} tokens, out {response.usage.completion_tokens}')
+                    TRACE.emit('usage', turn = turns, prompt = response.usage.prompt_tokens,
+                               completion = response.usage.completion_tokens, total = budget.tokens,
+                               cost = round(budget.cost, 6), truncated = False)
                 message = response.choices[0].message
                 if message.tool_calls:
                     print()
@@ -225,7 +248,7 @@ class DeepSeekAgent:
             err = f'{type(e).__name__}:{e}'
             print(f'[run failed]: agent run failed: {err}')
             self._save_memory(quiet=True)
-        return Result(
+        result = Result(
             outcome = outcome,
             calls = calls,
             turns = turns,
@@ -236,10 +259,22 @@ class DeepSeekAgent:
             failed_by_tag=by_tag,
             calls_by_tool=by_tool,
             wall = time.time() -start,
-            err = err
+            err = err,
+            cost = budget.cost,
+            stopped_by = stopped_by
         )
+        TRACE.emit('run_end', outcome = outcome, turns = turns, calls = calls, ok = ok,
+                   failed_by_tag = by_tag, calls_by_tool = by_tool,
+                   prompt_tokens = prompt_total, completion_tokens = completion_total,
+                   cost = round(budget.cost, 6), stopped_by = stopped_by,
+                   wall = round(result.wall, 4), err = err)
+        return result
 
     def run_task(self, task: str, cfg = CONFIG) -> Result:
+        TRACE.configure(cfg.trace_path)
+        TRACE.emit('run_start', mode = 'task', profile = cfg.profile, model = cfg.model_main,
+                   task = task, turns_limit = cfg.max_turns_main,
+                   limits = Budget.from_config(cfg).limits())
         self.message = list(self.system)
         client = OpenAI(
             api_key = cfg.api_key,
@@ -273,6 +308,7 @@ class DeepSeekAgent:
         return
                                             
     def run(self, cfg = CONFIG) -> None:
+        TRACE.configure(cfg.trace_path)
         self.message = self._load_memory(cfg = cfg)
         client = OpenAI(
             api_key = cfg.api_key,
@@ -305,6 +341,9 @@ class DeepSeekAgent:
                 {'role': 'user', 'content': user_input}
             )
             pending_exits = False
+            TRACE.emit('run_start', mode = 'repl', profile = cfg.profile, model = cfg.model_main,
+                       task = user_input, turns_limit = cfg.max_turns_main,
+                       limits = Budget.from_config(cfg).limits())
             executer = ToolExecution(self.regis, _ask_human, cfg = cfg)
             result = self._run_turn(client, executer, cfg = cfg)
             self._save_memory(quiet=True)
@@ -312,6 +351,7 @@ class DeepSeekAgent:
                 f'[outcome]: {result.outcome}, [calls]: {result.calls}, [turns]: {result.turns}, [ok]: {result.ok}, '
                 f'[calls_tool]: {result.calls_by_tool}, [failed]: {result.failed_by_tag}, '
                 f'[last_prompt]: {result.last_prompt}, [last_prompt_tokens]: {result.prompt_total}, [completion_tokens]: {result.completion_total}, '
+                f'[cost]: ${result.cost:.4f}, [stopped_by]: {result.stopped_by or "none"}, '
                 f'[wall]: {result.wall:.1f}s, '
                 f'[err]: {result.err}'
             )

@@ -341,6 +341,61 @@ def test_wall_budget_stops_the_run(cfg_factory, monkeypatch):
     result = send(agent, client, cfg)
     assert result.outcome == OUTCOME.TIMEOUT
     assert result.turns == 0
+    assert result.stopped_by == "wall"
+
+
+def test_token_budget_stops_the_run(cfg_factory):
+    cfg = cfg_factory(token_budget=100)
+    write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 90, 20)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.outcome == OUTCOME.BUDGET
+    assert result.stopped_by == "tokens"
+    assert result.turns == 1
+    assert result.calls == 1
+    assert (result.prompt_total, result.completion_total) == (90, 20)
+    assert len(client.stream_calls) == 1
+
+
+def test_cost_budget_stops_the_run(cfg_factory):
+    cfg = cfg_factory(cost_budget=0.5, price_in=1.0, price_out=0.0)
+    write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 600_000, 0)),
+    )
+
+    result = send(agent, client, cfg)
+
+    assert result.outcome == OUTCOME.BUDGET
+    assert result.stopped_by == "cost"
+    assert result.cost == pytest.approx(0.6)
+
+
+def test_a_run_within_budget_reports_no_stop(cfg_factory):
+    cfg = cfg_factory(token_budget=10_000, cost_budget=100.0, price_in=1.0, price_out=1.0)
+    agent, client = make_agent(cfg, Stream(completion(model_message("done"), 10, 5)))
+
+    result = send(agent, client, cfg)
+
+    assert result.outcome == OUTCOME.COMPLETED
+    assert result.stopped_by == ""
+    assert result.cost > 0
+
+
+def test_cost_stays_zero_without_prices(cfg_factory):
+    cfg = cfg_factory(cost_budget=1.0)
+    agent, client = make_agent(cfg, Stream(completion(model_message("done"), 1000, 1000)))
+
+    result = send(agent, client, cfg)
+
+    assert result.outcome == OUTCOME.COMPLETED
+    assert result.cost == 0.0
 
 
 def test_interrupted_tool_calls_are_closed_off(cfg, workspace):
@@ -458,13 +513,109 @@ def test_tool_schemas_match_the_registry(cfg):
     assert [t["function"]["name"] for t in agent.tools] == [t.name for t in TOOLS]
 
 
+# --------------------------------------------------------------------------- trace
+
+
+def traced_events(path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_run_writes_a_trace_file(cfg_factory, session_dir, patch_openai):
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(trace))
+    write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("done"), 12, 6)),
+    )
+
+    patch_openai(client)
+    agent.run_task("read the file", cfg=cfg)
+
+    events = traced_events(trace)
+    names = [e["event"] for e in events]
+    assert names[0] == "run_start"
+    assert names[-1] == "run_end"
+    assert names.count("turn") == 2
+    assert "tool_call" in names and "tool_result" in names
+    assert events[0]["task"] == "read the file"
+    assert events[0]["limits"] == "none"
+    assert events[-1]["outcome"] == OUTCOME.COMPLETED
+    usage = [e for e in events if e["event"] == "usage"]
+    assert [e["total"] for e in usage] == [15, 33]
+    result = next(e for e in events if e["event"] == "tool_result")
+    assert result["tool"] == "read_file" and result["ok"] is True
+    assert [e["seq"] for e in events] == list(range(1, len(events) + 1))
+
+
+def test_no_trace_file_without_a_path(cfg, session_dir, patch_openai):
+    agent, client = make_agent(cfg, Stream(completion(model_message("done"))))
+
+    patch_openai(client)
+    agent.run_task("hi", cfg=cfg)
+
+    assert not (session_dir / "trace.jsonl").exists()
+
+
+def test_a_budget_stop_is_traced(cfg_factory, session_dir, patch_openai):
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(token_budget=50, trace_path=str(trace))
+    write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 60, 0)),
+    )
+
+    patch_openai(client)
+    agent.run_task("read", cfg=cfg)
+
+    events = traced_events(trace)
+    stop = next(e for e in events if e["event"] == "budget_stop")
+    assert stop["reason"] == "tokens"
+    assert stop["tokens"] == 60
+    assert events[-1]["outcome"] == OUTCOME.BUDGET
+    assert events[-1]["stopped_by"] == "tokens"
+
+
+def test_tool_events_name_the_failure_tag(cfg_factory, session_dir, patch_openai):
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(trace))
+    write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="b"),
+        ]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+    )
+
+    patch_openai(client)
+    agent.run_task("edit it", cfg=cfg)
+
+    result = next(e for e in traced_events(trace) if e["event"] == "tool_result")
+    assert result["ok"] is False
+    assert result["tag"] == "need_read"
+
+
+def test_run_start_records_the_configured_limits(cfg_factory, session_dir, patch_openai):
+    trace = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(trace), token_budget=1000, wall_budget=60.0)
+    agent, client = make_agent(cfg, Stream(completion(model_message("done"))))
+
+    patch_openai(client)
+    agent.run_task("hi", cfg=cfg)
+
+    assert traced_events(trace)[0]["limits"] == "tokens=1000,wall=60.0"
+
+
 # --------------------------------------------------------------------------- CLI
 
 
 def test_exit_codes_cover_every_outcome():
     assert cli.EXIT == {
         OUTCOME.COMPLETED: 0, OUTCOME.ERROR: 1, OUTCOME.EXHAUSTED: 3,
-        OUTCOME.TIMEOUT: 4, OUTCOME.INTERRUPTED: 130,
+        OUTCOME.TIMEOUT: 4, OUTCOME.BUDGET: 5, OUTCOME.INTERRUPTED: 130,
     }
 
 

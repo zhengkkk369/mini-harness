@@ -5,6 +5,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 
 class CompactContent:
@@ -90,9 +91,13 @@ Please summarize those conversation history into a working summary report, follo
             message_new = self._compact_text(cut, response, message, cfg = cfg)
         except Exception as e:
             print(f'[compact content]: compact failed: {type(e).__name__}: {e}, skip this round')
+            TRACE.emit('compact', removed = len(old), kept = len(message) - cut, ok = False,
+                       error = type(e).__name__, seconds = round(time.time() - start, 4))
             return message
         end = time.time() -start
         print(f'[compact content]: compact done -- {end:.1f}s')
+        TRACE.emit('compact', removed = len(old), kept = len(message) - cut, ok = True,
+                   seconds = round(end, 4))
         return message_new
 
 

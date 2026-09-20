@@ -30,11 +30,20 @@ os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 from mini_harness.config import Config  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.block import TODO  # noqa: E402
+from mini_harness.trace import TRACE  # noqa: E402
 
 REGISTRY = {tool.name: tool for tool in box.TOOLS}
 ALWAYS_ALLOW = box._always_allow
 ALWAYS_DENY = box._for_sub
 SCRATCH = ROOT / ".pytest-work"
+
+
+@pytest.fixture(autouse=True)
+def isolated_trace():
+    """The trace is a module-level singleton; never leak a path between tests."""
+    TRACE.configure(None)
+    yield
+    TRACE.configure(None)
 
 
 @pytest.fixture(scope="session", autouse=True)

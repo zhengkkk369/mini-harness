@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from mini_harness.compact import COMPACT
+from mini_harness.trace import TRACE
 
 
 class FakeClient:
@@ -216,3 +217,42 @@ def test_compaction_reports_and_survives_an_unwritable_history(cfg_factory, sess
     result = COMPACT.compact_content(FakeClient(), messages, session_dir / "session.json", cfg=cfg)
 
     assert "the summary" in result[1]["content"]
+
+
+# --------------------------------------------------------------------------- trace
+
+
+def compact_events(path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_compaction_is_traced(cfg_factory, session_dir, tmp_path):
+    path = tmp_path / "trace.jsonl"
+    messages = conversation(user_turns=6, tool_runs=3)
+    TRACE.configure(path)
+
+    COMPACT.compact_content(FakeClient(), messages, session_dir / "session.json",
+                            cfg=cfg_factory(recent_keep=5))
+    TRACE.configure(None)
+
+    event = compact_events(path)[0]
+    assert event["event"] == "compact"
+    assert event["ok"] is True
+    assert event["kept"] >= 5
+    # the system message is never removed, so the parts sum to one less
+    assert event["removed"] + event["kept"] == len(messages) - 1
+
+
+def test_a_failed_compaction_is_traced(cfg_factory, session_dir, tmp_path):
+    path = tmp_path / "trace.jsonl"
+    TRACE.configure(path)
+
+    COMPACT.compact_content(FakeClient(error=RuntimeError("down")),
+                            conversation(user_turns=6, tool_runs=3),
+                            session_dir / "session.json", cfg=cfg_factory(recent_keep=5))
+    TRACE.configure(None)
+
+    event = compact_events(path)[0]
+    assert event["event"] == "compact"
+    assert event["ok"] is False
+    assert event["error"] == "RuntimeError"

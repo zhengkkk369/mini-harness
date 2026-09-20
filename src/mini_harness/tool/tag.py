@@ -27,6 +27,7 @@ class Outcome:
     ERROR: str = 'error'
     EXHAUSTED: str = 'exhausted'
     TIMEOUT: str = 'timeout'
+    BUDGET: str = 'budget'
 
 TAG = Tag()
 LEVEL = Level()

@@ -8,15 +8,7 @@ agent log directory. Only the directory is configurable.
 import os
 
 SESSION_NAME = 'mini_harness_session.json'
-
-
-def _wall_from_env() -> float:
-    raw = os.environ.get("MINI_HARNESS_WALL_BUDGET", 1400.0)
-    try:
-        v = float(raw)
-        return v if v > 0 else 1400.0
-    except (TypeError, ValueError):
-        return 1400.0
+TRACE_NAME = 'mini_harness_trace.jsonl'
 
 
 def _log_dir() -> str:
@@ -27,6 +19,10 @@ def _log_dir() -> str:
 
 def session_path() -> str:
     return f'{_log_dir().rstrip("/")}/{SESSION_NAME}'
+
+
+def trace_path() -> str:
+    return f'{_log_dir().rstrip("/")}/{TRACE_NAME}'
 
 
 BENCH_PROMPT: str = '''
@@ -133,6 +129,7 @@ BENCH_OVERRIDE: dict = {
     'guard_read': False,
     'guard_write': False,
     'session_path': session_path(),
+    'trace_path': trace_path(),
     'deny_name': (),
     'deny_dir': frozenset(),
     'bash_env_deny': ('DEEPSEEK_API_KEY',),

@@ -6,18 +6,20 @@ import subprocess
 import json
 import time
 import hashlib
+import inspect
 import shutil
 import threading
 import uuid
 
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Annotated
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, StringConstraints, field_validator, model_validator
 from enum import Enum
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.trace import TRACE
 from mini_harness.tool.path import validate_read, validate_write, is_denied, _resolve_file
 from mini_harness.tool.block import TODO, CLIP, SUBAGENT
 from mini_harness.retry_request import retry_call
@@ -26,8 +28,12 @@ from mini_harness.tool.tag import TAG, MORE, LEVEL, HIT
 
 Nonblank = Annotated[str, StringConstraints(strip_whitespace = True, min_length = 1)]
 LINE_NO = re.compile(r'^\s*\d+\t')
+TOOL_NAME = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 READ_TOOLS = {'read_file', 'grep_file'}
 WRITE_TOOLS = {'write_file', 'edit_file'}
+# Tools whose file-state bookkeeping keys on an explicit file_path argument:
+# the write gate reads it, and read_file uses it to record the read.
+PATH_KEYED_TOOLS = WRITE_TOOLS | {'read_file'}
 
 def _safe_time(p):
     try:
@@ -252,6 +258,17 @@ class ToolExecution:
         return content
                 
     def execute_tool(self, tool_call, cfg = CONFIG) -> ToolItem:
+        """Run one tool call, emitting a trace pair around every outcome."""
+        name = tool_call.function.name
+        started = time.time()
+        TRACE.emit('tool_call', tool = name, args = tool_call.function.arguments,
+                   nested = self.confirm is _for_sub)
+        item = self._dispatch(tool_call, cfg = cfg)
+        TRACE.emit('tool_result', tool = name, ok = item.ok, tag = item.tag,
+                   chars = len(item.content), seconds = round(time.time() - started, 4))
+        return item
+
+    def _dispatch(self, tool_call, cfg = CONFIG) -> ToolItem:
         tool = self.regis.get(tool_call.function.name)
         if tool is None:
             return ToolItem(f'[{TAG.UNKNOWN_TOOL}]: the tool is unknown, please check the tool map {'\n'.join(self.regis)}', False, TAG.UNKNOWN_TOOL)
@@ -277,8 +294,10 @@ class ToolExecution:
         
         try:
             # Pass the config through: without it every tool would fall back to
-            # the module-level CONFIG and ignore the caller's workspace.
-            result = funs(args, cfg = cfg)
+            # the module-level CONFIG and ignore the caller's workspace. Tools
+            # that do not accept cfg are called without it; ToolDefinition
+            # records which convention each function uses.
+            result = funs(args, cfg = cfg) if tool.wants_cfg else funs(args)
         except Exception as e:
             return ToolItem(f'[{TAG.EXECUTE_FAILED}]: the tool execute failed: {type(e).__name__}: {e}', False, f'{TAG.EXECUTE_FAILED}:{type(e).__name__}')
 
@@ -651,6 +670,8 @@ completed the task by giving the summary and analyzing report
     ]
     start = time.time()
     print(f'[{inp.agent_type.value}]: {inp.task_description}')
+    TRACE.emit('subagent_start', agent = inp.agent_type.value, task = inp.task_description,
+               tools = config['tools'], turns_limit = cfg.max_turns_sub)
     client = OpenAI(
         api_key = cfg.api_key,
         base_url = cfg.base_url,
@@ -681,18 +702,102 @@ completed the task by giving the summary and analyzing report
             )
             end = time.time() -start
             print(f'[{inp.agent_type.value}]: {inp.task_description} -- {tool_count} tools -- {end:.1f}s')
+            TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
+                       seconds = round(end, 4), ok = True)
             return message.content
     else:
+        TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
+                   seconds = round(time.time() - start, 4), ok = False, reason = 'exhausted')
         return f'[agent done]: the agent run out of the turns for the actions, the task is incompleted'
     
 
+def _signature(function: Callable):
+    try:
+        return inspect.signature(function)
+    except (TypeError, ValueError):
+        return None
+
+
+def _accepts_cfg(function: Callable) -> bool:
+    """Whether the tool can be called as function(args, cfg=cfg)."""
+    sig = _signature(function)
+    if sig is None:
+        return False
+    cfg_param = sig.parameters.get('cfg')
+    if cfg_param is not None:
+        return cfg_param.kind in (cfg_param.KEYWORD_ONLY, cfg_param.POSITIONAL_OR_KEYWORD)
+    return any(p.kind is p.VAR_KEYWORD for p in sig.parameters.values())
+
+
+def _validate_definition(definition: 'ToolDefinition') -> None:
+    name = definition.name
+    if not isinstance(name, str) or not TOOL_NAME.match(name):
+        raise ValueError(f'[tool contract]: {name!r} is not a valid tool name '
+                         '(letters, digits, underscore and dash only, at most 64)')
+    if not isinstance(definition.description, str) or not definition.description.strip():
+        raise ValueError(f'[tool contract]: {name} needs a non-empty description, it is the model\'s only documentation')
+    parameters = definition.parameters
+    if not (isinstance(parameters, type) and issubclass(parameters, BaseModel)):
+        raise ValueError(f'[tool contract]: {name}.parameters must be a BaseModel subclass')
+    if not isinstance(definition.risky, bool):
+        raise ValueError(f'[tool contract]: {name}.risky must be a bool')
+    if not callable(definition.function):
+        raise ValueError(f'[tool contract]: {name}.function is not callable')
+
+    sig = _signature(definition.function)
+    if sig is None:
+        raise ValueError(f'[tool contract]: cannot inspect the signature of {name}.function; '
+                         'wrap it in a named function so the executor can call it')
+    positional = [p for p in sig.parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    if not positional:
+        raise ValueError(f'[tool contract]: {name}.function must accept the arguments model as its first parameter')
+    cfg_param = sig.parameters.get('cfg')
+    if cfg_param is not None and cfg_param.kind is cfg_param.POSITIONAL_ONLY:
+        raise ValueError(f'[tool contract]: {name}.function takes cfg as positional-only, '
+                         'but the executor calls it as cfg=...')
+    return
+
+
+def validate_tools(tools: list) -> None:
+    """Cross-tool contracts that no single definition can check on its own."""
+    names = [tool.name for tool in tools]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise RuntimeError(f'[tool contract]: duplicate tool names {duplicates}')
+    missing = (READ_TOOLS | WRITE_TOOLS) - set(names)
+    if missing:
+        raise RuntimeError(f'[tool name drift]: {sorted(missing)} not in TOOLS')
+    for tool in tools:
+        # The gate reads args.file_path; without the field it would silently
+        # skip every check and let an unread file be rewritten.
+        if tool.name in PATH_KEYED_TOOLS and 'file_path' not in tool.parameters.model_fields:
+            raise RuntimeError(f'[tool contract]: {tool.name} must declare a file_path field, '
+                               'the file-state gate and read tracking key on it')
+    return
+
+
 @dataclass(frozen = True)
 class ToolDefinition:
+    """One tool: the schema the model sees, the function that runs, and its risk.
+
+    The contract is enforced here rather than described to the model, because a
+    definition that breaks it would otherwise fail at dispatch time, which is
+    both late and silent. `wants_cfg` records whether the function accepts the
+    config keyword, so functions written with either signature are callable.
+    """
+
     name: str
     description: str
     parameters: type[BaseModel]
     function: Callable
     risky: bool
+    wants_cfg: bool = field(init = False, default = False)
+
+    def __post_init__(self) -> None:
+        _validate_definition(self)
+        object.__setattr__(self, 'wants_cfg', _accepts_cfg(self.function))
+        return
 
 TOOLS = [
     ToolDefinition('glob_file', 'glob and check the file', GlobFileInput, glob_file, False),
@@ -706,9 +811,7 @@ TOOLS = [
     ToolDefinition('run_subagent', 'build and run the subagent to finish the task', RunSubAgentInput, run_subagent, True)
 ]
 
-_names = {t.name for t in TOOLS}
-if not (READ_TOOLS | WRITE_TOOLS) <= _names:
-    raise RuntimeError(f'[tool name drift]: {(READ_TOOLS | WRITE_TOOLS) - _names} not in TOOLS')
+validate_tools(TOOLS)
 
 
 
