@@ -656,6 +656,34 @@ def test_main_maps_a_failed_outcome_to_a_nonzero_exit(monkeypatch, tmp_path):
     assert exit_info.value.code == 3
 
 
+def test_main_announces_the_budgets_and_trace(cfg_factory, monkeypatch, capsys):
+    cfg = cfg_factory(token_budget=5000, wall_budget=60.0, trace_path="trace.jsonl")
+    monkeypatch.setattr("sys.argv", ["mini-harness", "--task", "hello"])
+    monkeypatch.setattr(DeepSeekAgent, "run_task", lambda self, task, cfg=None: Result(
+        OUTCOME.COMPLETED, 0, 1, 0, {}, {}, 1, 1, 1, 0.1))
+
+    with pytest.raises(SystemExit):
+        cli.main(cfg=cfg)
+
+    banner = capsys.readouterr().out.splitlines()[0]
+    assert banner.startswith("[mini_harness]:")
+    assert "budget = tokens=5000,wall=60.0" in banner
+    assert "trace = trace.jsonl" in banner
+
+
+def test_main_reports_an_unconfigured_trace_as_off(cfg, monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["mini-harness", "--task", "hello"])
+    monkeypatch.setattr(DeepSeekAgent, "run_task", lambda self, task, cfg=None: Result(
+        OUTCOME.COMPLETED, 0, 1, 0, {}, {}, 1, 1, 1, 0.1))
+
+    with pytest.raises(SystemExit):
+        cli.main(cfg=cfg)
+
+    banner = capsys.readouterr().out.splitlines()[0]
+    assert "budget = none" in banner
+    assert "trace = off" in banner
+
+
 def test_run_summary_separates_its_fields(cfg, workspace, monkeypatch, capsys):
     """Regression: adjacent literals used to glue '[ok]: 1[calls_tool]:' together."""
     agent, client = make_agent(cfg)

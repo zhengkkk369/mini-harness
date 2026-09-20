@@ -16,7 +16,7 @@
 
 - **Small, but complete.** About 1,700 lines of Python: nine tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 258 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 274 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the nine tools, context compaction, configuration and the sandbox
   command builder.
