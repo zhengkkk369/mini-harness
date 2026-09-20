@@ -6,10 +6,15 @@ with test_). Flags exist only to make failure modes reachable:
     --bad-handshake   answer initialize with a JSON-RPC error
     --noisy           emit a non-JSON line, a notification, and a server request
     --silent          never answer anything
+    --binary          emit a line containing bytes that are not valid UTF-8
 """
 
 import json
 import sys
+
+# The protocol is UTF-8 on stdout. A Python server on a non-UTF-8 console has to
+# say so, or its own printing dies on the first non-ASCII character it sends.
+sys.stdout.reconfigure(encoding='utf-8', newline='\n')
 
 TOOLS = [
     {
@@ -50,7 +55,9 @@ TOOLS = [
 
 
 def send(payload: dict) -> None:
-    sys.stdout.write(json.dumps(payload) + '\n')
+    # ensure_ascii=False on purpose: non-ASCII must travel as real UTF-8 bytes,
+    # otherwise the reader's encoding would never be exercised.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + '\n')
     sys.stdout.flush()
 
 
@@ -81,6 +88,12 @@ def call_tool(request_id, name, arguments) -> None:
 
 def main() -> int:
     flags = set(sys.argv[1:])
+    if '--binary' in flags:
+        # A server may emit bytes that are not valid UTF-8; a text-mode pipe
+        # decoded with the locale encoding would die on this.
+        sys.stdout.flush()
+        sys.stdout.buffer.write(b'{"jsonrpc":"2.0","method":"x","params":"\xff\xfe"}\n')
+        sys.stdout.buffer.flush()
     if '--noisy' in flags:
         sys.stdout.write('this line is not json\n')
         sys.stdout.flush()

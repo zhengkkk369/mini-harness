@@ -16,7 +16,7 @@ success rates, and they are **not** a substitute for the SWE-bench and
 Terminal-Bench evaluations described in [BENCHMARKS.md](BENCHMARKS.md). What they
 do establish is the cost of a mechanism and whether it does what it claims,
 which is what a wall-clock and turn-count experiment with a fixed script can
-answer exactly.
+answer exactly. For numbers from a real model, see [MODEL_EVAL.md](MODEL_EVAL.md).
 
 ## Environment
 

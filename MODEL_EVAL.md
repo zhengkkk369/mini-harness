@@ -158,7 +158,68 @@ Two findings worth keeping:
 
 No retries fired in any run, so the backoff path was not exercised.
 
-## 3. Harbor and SWE-bench Verified: one task, not solved
+## 3. The MCP bridge, against a real server
+
+The bridge was validated against the actual
+[`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers)
+(v0.2.0), started through `npx`, exposing a scratch directory.
+
+```sh
+export MINI_HARNESS_MCP_SERVERS="fs=npx -y @modelcontextprotocol/server-filesystem /path/to/dir"
+```
+
+| step | outcome |
+| --- | --- |
+| Handshake with the real server | worked; it identifies as `secure-filesystem-server` 0.2.0 |
+| Tool discovery | 14 tools, with required-argument lists read correctly |
+| `list_allowed_directories`, `list_directory`, `read_text_file`, `get_file_info` | all returned results |
+| Missing required argument | refused locally as `invalid_args`, before the call |
+| A path outside the granted directory | refused **by the server** |
+| `policy_deny_tools=('fs__write_file',)` | refused as `policy_denied` |
+| Non-ASCII round trip | exact, including an em dash |
+
+Then a real model, through the CLI:
+
+```
+[mini_harness]: profile = local, work_space = ..., guard = True/True, ..., mcp = 14 tool(s)
+
+fs__list_allowed_directories: {}
+fs__list_directory:        {"path": "...\\exposed"}
+fs__read_text_file:        {"path": "...\\exposed\\notes.md"}
+fs__list_directory:        {"path": "...\\exposed\\config"}
+answer: "The release train leaves at 17:45 UTC, per notes.md. The config
+         subdirectory contains a file named app.toml."
+
+outcome completed, 4 turns, 4 calls, 0 failures, 22,981 prompt tokens,
+239 completion tokens, 7.1 s
+```
+
+Both facts in the answer are correct, and the model used only bridged tools even
+though the local `read_file` and `glob_file` were available alongside them.
+
+### Three defects this found, that the stub server could not
+
+A stub I wrote myself agreed with my own assumptions. A real server did not:
+
+1. **`npx` could not be started by name.** On Windows it is `npx.CMD`, and
+   `CreateProcess` does not apply `PATHEXT`, so spawning `npx` raised
+   `OSError: [WinError 2]`. The bridge now resolves the executable through
+   `shutil.which` first.
+2. **One bad byte killed the reader.** The pipe was opened in text mode without
+   an encoding, so it was decoded with the machine's locale codec (GBK here). A
+   single non-GBK byte raised `UnicodeDecodeError` **inside the reader thread**,
+   which died silently; every later call then sat out its full timeout and looked
+   like a slow server rather than a broken pipe. The pipe is now UTF-8 with
+   `errors='replace'`.
+3. **A dead server kept callers waiting.** Even with the decode fixed, a server
+   that exits mid-call left the request waiting for the whole timeout. The reader
+   now marks the client closed and wakes anyone waiting, so the failure is
+   immediate and named.
+
+All three have regression tests, including one that kills a server mid-call and
+asserts the caller is released quickly.
+
+## 4. Harbor and SWE-bench Verified: one task, not solved
 
 The repository's documented benchmark path is Harbor against SWE-bench Verified.
 It ran end to end on this machine — one task, as a smoke test:

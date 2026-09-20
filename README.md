@@ -16,7 +16,7 @@
 
 - **Small, but complete.** About 2,300 lines of Python: ten tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 427 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 433 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the ten tools, context compaction, retrievable memory, MCP bridging,
   configuration and the sandbox command builder.
@@ -269,6 +269,39 @@ One unreachable server never stops a run: the failure is printed and traced as
 ```sh
 export MINI_HARNESS_MCP_TIMEOUT=10   # seconds, bounds the handshake and every call
 ```
+
+This was validated end to end against the real
+`@modelcontextprotocol/server-filesystem` (v0.2.0), which contributed 14 tools;
+a real model then used them to answer a question in four turns. That run is
+recorded in [MODEL_EVAL.md](MODEL_EVAL.md).
+
+### What MCP tools are not subject to
+
+The workspace guards described above apply to the **built-in** file tools. A
+bridged tool is a remote call, so `guard_read`, `guard_write` and the sensitive
+file deny list do not reach it: the boundary is whatever the server was granted.
+In the run above, `read_file` refused a path outside the workspace while
+`fs__read_text_file` was refused by the *server* for the same reason, on the
+server's own rules.
+
+The controls that do apply to a bridged tool are the dispatch policy
+(`policy_deny_tools`, `policy_deny_patterns`, `read_only`), approval (remote
+tools are risky by default), the executor's argument validation, and the trace.
+Treat an MCP server as a trusted component you chose to run.
+
+### A note for Python MCP servers
+
+The protocol is UTF-8 on stdout. A Python server on a non-UTF-8 console has to
+reconfigure its own stdout, or it dies the first time it sends a non-ASCII
+character:
+
+```python
+sys.stdout.reconfigure(encoding='utf-8', newline='\n')
+```
+
+The client reads UTF-8 regardless of console locale, so the failure is entirely
+server-side — and it looks like the server crashing rather than an encoding
+problem.
 
 ## Get started
 

@@ -7,11 +7,14 @@ the suite stays offline and deterministic.
 import json
 import shlex
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from mini_harness import mcp
 from mini_harness.mcp import (
     MCPBridge, MCPClient, MCPError, model_from_schema, parse_servers, tool_name,
 )
@@ -144,6 +147,41 @@ def test_a_client_starts_and_lists_tools(cfg):
     assert client.server_info == {'name': 'stub', 'version': '1'}
 
 
+def test_the_command_is_resolved_through_path(monkeypatch):
+    """On Windows npx is npx.CMD, and CreateProcess will not find the bare name."""
+    seen = {}
+
+    def fake_popen(command, **kwargs):
+        seen['command'] = command
+        raise OSError('stop here')
+
+    monkeypatch.setattr(mcp.shutil, 'which',
+                        lambda name: 'C:/tools/npx.CMD' if name == 'npx' else None)
+    monkeypatch.setattr(mcp.subprocess, 'Popen', fake_popen)
+
+    client = MCPClient('stub', ['npx', '-y', 'some-server'])
+    with pytest.raises(OSError):
+        client.start()
+
+    assert seen['command'] == ['C:/tools/npx.CMD', '-y', 'some-server']
+
+
+def test_an_unresolvable_command_is_left_alone(monkeypatch):
+    seen = {}
+
+    def fake_popen(command, **kwargs):
+        seen['command'] = command
+        raise FileNotFoundError('no such command')
+
+    monkeypatch.setattr(mcp.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(mcp.subprocess, 'Popen', fake_popen)
+
+    with pytest.raises(FileNotFoundError):
+        MCPClient('stub', ['definitely-not-here']).start()
+
+    assert seen['command'] == ['definitely-not-here']
+
+
 def test_a_refused_handshake_is_an_error(cfg):
     with pytest.raises(MCPError, match='initialize failed'):
         client_of(cfg, '--bad-handshake').start()
@@ -174,12 +212,50 @@ def test_a_server_request_is_answered_with_an_error(cfg):
         assert client.list_tools()          # still usable after the server's request
 
 
+def test_invalid_utf8_from_a_server_does_not_kill_the_link(cfg):
+    """Regression: text mode decoded with the locale codec died on one bad byte."""
+    with client_of(cfg, '--binary') as client:
+        assert [tool['name'] for tool in client.list_tools()][0] == 'echo'
+        assert client.call_tool('echo', {'text': 'still here'}) == 'echo: still here'
+
+
+def test_a_dead_server_unblocks_a_waiting_call(cfg_factory):
+    """Regression: the reader died and every later call sat out its full timeout."""
+    cfg = cfg_factory(mcp_timeout=30.0)
+    client = client_of(cfg).start()
+    try:
+        killer = threading.Timer(0.3, client.process.kill)
+        killer.start()
+        start = time.time()
+        with pytest.raises(MCPError, match='not running'):
+            client.call_tool('slow', {})
+        assert time.time() - start < 10, 'the call waited for the timeout instead'
+    finally:
+        killer.cancel()
+        client.close()
+
+
+def test_a_closed_client_refuses_immediately(cfg):
+    client = client_of(cfg).start()
+    client.close()
+    start = time.time()
+    with pytest.raises(MCPError, match='not running'):
+        client.list_tools()
+    assert time.time() - start < 1
+
+
 # --------------------------------------------------------------------------- calling
 
 
 def test_a_text_result_is_returned(cfg):
     with client_of(cfg) as client:
         assert client.call_tool('echo', {'text': 'hi'}) == 'echo: hi'
+
+
+def test_non_ascii_round_trips_exactly(cfg):
+    """The stub sends raw UTF-8; the locale codec would mangle or reject it."""
+    with client_of(cfg) as client:
+        assert client.call_tool('echo', {'text': 'release — ops ✅'}) == 'echo: release — ops ✅'
 
 
 def test_non_text_blocks_are_json_encoded(cfg):

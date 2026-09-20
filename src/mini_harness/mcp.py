@@ -19,6 +19,7 @@ import json
 import queue
 import re
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -47,6 +48,10 @@ JSON_TYPES = {
 
 class MCPError(RuntimeError):
     """A server failed, refused a call, or stopped answering."""
+
+# Pushed by the reader when the pipe ends, so a waiting request fails at once
+# instead of sitting out its whole timeout.
+CLOSED = object()
 
 def parse_servers(specs) -> list:
     """Turn ``name=command line`` specs into (name, argv) pairs."""
@@ -122,6 +127,7 @@ class MCPClient:
         self.env = env
         self.cwd = cwd
         self.process = None
+        self.closed = False
         self.notifications: list = []
         self.noise: list = []
         self._inbox: queue.Queue = queue.Queue()
@@ -133,9 +139,20 @@ class MCPClient:
     # ------------------------------------------------------------------ lifecycle
 
     def start(self) -> 'MCPClient':
+        command = list(self.command)
+        resolved = shutil.which(command[0]) if command else None
+        if resolved:
+            # On Windows an entry point such as npx is really npx.CMD, and
+            # CreateProcess will not find it from the bare name.
+            command[0] = resolved
+        self.closed = False
         self.process = subprocess.Popen(
-            self.command, stdin = subprocess.PIPE, stdout = subprocess.PIPE,
+            command, stdin = subprocess.PIPE, stdout = subprocess.PIPE,
             stderr = subprocess.DEVNULL, text = True, bufsize = 1,
+            # A server is free to send UTF-8, and text mode would decode it with
+            # the machine's locale encoding, so on a non-UTF-8 console one odd
+            # byte would kill the reader and every later call would time out.
+            encoding = 'utf-8', errors = 'replace',
             env = self.env, cwd = self.cwd)
         self._reader = threading.Thread(target = self._pump, name = f'mcp-{self.name}', daemon = True)
         self._reader.start()
@@ -150,7 +167,9 @@ class MCPClient:
 
     def close(self) -> None:
         if self.process is None:
+            self.closed = True
             return
+        self.closed = True
         process, self.process = self.process, None
         try:
             if process.stdin:
@@ -181,28 +200,35 @@ class MCPClient:
     def _pump(self) -> None:
         """Read replies off the pipe; never let a bad line kill the server link."""
         stream = self.process.stdout if self.process else None
-        if stream is None:
-            return
-        for line in stream:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                message = json.loads(line)
-            except ValueError:
-                self.noise.append(line[:200])
-                continue
-            if not isinstance(message, dict):
-                self.noise.append(line[:200])
-                continue
-            if 'method' in message and 'id' in message:
-                # server -> client request: we support none of them yet
-                self._reply_unsupported(message.get('id'))
-                continue
-            if 'id' in message:
-                self._inbox.put(message)
-                continue
-            self.notifications.append(message)
+        try:
+            if stream is None:
+                return
+            for line in stream:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    self.noise.append(line[:200])
+                    continue
+                if not isinstance(message, dict):
+                    self.noise.append(line[:200])
+                    continue
+                if 'method' in message and 'id' in message:
+                    # server -> client request: we support none of them yet
+                    self._reply_unsupported(message.get('id'))
+                    continue
+                if 'id' in message:
+                    self._inbox.put(message)
+                    continue
+                self.notifications.append(message)
+        except (OSError, UnicodeDecodeError) as error:
+            self.noise.append(f'reader stopped: {type(error).__name__}: {error}')
+        finally:
+            # Wake anyone waiting rather than leaving them to time out.
+            self.closed = True
+            self._inbox.put(CLOSED)
         return
 
     def _send(self, message: dict) -> None:
@@ -230,6 +256,8 @@ class MCPClient:
     def _request(self, method: str, params: dict|None = None, timeout: float|None = None):
         """One request at a time, so replies cannot be matched to the wrong call."""
         with self._lock:
+            if self.closed:
+                raise MCPError(f'{self.name}: the server is not running any more')
             self._seq += 1
             request_id = self._seq
             self._send({'jsonrpc': '2.0', 'id': request_id, 'method': method,
@@ -243,6 +271,8 @@ class MCPClient:
                     message = self._inbox.get(timeout = remaining)
                 except queue.Empty:
                     raise MCPError(f'{self.name}: timed out waiting for {method}') from None
+                if message is CLOSED:
+                    raise MCPError(f'{self.name}: the server is not running any more')
                 if message.get('id') != request_id:
                     continue
                 if 'error' in message:
