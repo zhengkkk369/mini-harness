@@ -39,6 +39,9 @@ PATH_KEYED_TOOLS = WRITE_TOOLS | {'read_file'}
 # Tools with no side effects, and therefore safe to overlap. run_todo is
 # excluded because it mutates shared state.
 SIDE_EFFECT_FREE_TOOLS = {'read_file', 'grep_file', 'glob_file'}
+# Risky tools that are still worth overlapping: subagents are independent by
+# construction and spend their time blocked on their own model calls.
+PARALLEL_RISKY_TOOLS = {'run_subagent'}
 # What read_only mode refuses: anything that can change the workspace or the
 # machine, directly or through a subagent.
 READ_ONLY_DENIED = WRITE_TOOLS | {'run_bash', 'run_sandbox', 'run_subagent'}
@@ -164,6 +167,8 @@ class ToolExecution:
         self.policy = policy if policy is not None else Policy.from_config(cfg, READ_ONLY_DENIED)
         self.last_tool = None
         self.files = {}
+        # Approvals collected on the calling thread before a batch fans out.
+        self.approvals = {}
         # Read-only batches run concurrently, so the file-state bookkeeping and
         # the duplicate-call check have to survive two threads at once. The lock
         # is reentrant because _record updates a record through _mark.
@@ -292,26 +297,51 @@ class ToolExecution:
     def execute_batch(self, tool_calls, cfg = CONFIG) -> list[ToolItem]:
         """Run a batch of tool calls, returning results in the order given.
 
-        A batch overlaps only when every call is side-effect free. Mixing in a
-        write, a risky tool or an unknown name makes the whole batch serial,
-        because those calls can depend on each other's effects.
+        A batch overlaps only when every call is safe to overlap: side-effect
+        free, or a batch consisting entirely of subagents. Mixing in a write, a
+        shell call or an unknown name makes the whole batch serial, because
+        those calls can depend on each other's effects.
         """
         calls = list(tool_calls)
         if not self._parallelizable(calls, cfg):
             return [self.execute_tool(call, cfg = cfg) for call in calls]
-        workers = min(len(calls), cfg.max_parallel_tools)
-        TRACE.emit('batch_parallel', tools = [call.function.name for call in calls], workers = workers)
-        with ThreadPoolExecutor(max_workers = workers) as pool:
-            return list(pool.map(lambda call: self.execute_tool(call, cfg = cfg), calls))
+        # Ask about every risky call first, on this thread: prompts must not
+        # interleave with each other or race an approval.
+        self.approvals = {call.id: self.confirm(call, cfg = cfg)
+                          for call in calls if self._is_risky(call)}
+        try:
+            if any(not allowed for allowed in self.approvals.values()):
+                # keep the serial path so a refusal reads exactly as before
+                return [self.execute_tool(call, cfg = cfg) for call in calls]
+            workers = min(len(calls), cfg.max_parallel_tools)
+            TRACE.emit('batch_parallel', tools = [call.function.name for call in calls],
+                       workers = workers)
+            with ThreadPoolExecutor(max_workers = workers) as pool:
+                return list(pool.map(lambda call: self.execute_tool(call, cfg = cfg), calls))
+        finally:
+            self.approvals = {}
+
+    def _is_risky(self, call) -> bool:
+        tool = self.regis.get(call.function.name)
+        return tool is not None and tool.risky
 
     def _parallelizable(self, calls: list, cfg = CONFIG) -> bool:
         if not cfg.parallel_tools or len(calls) < 2:
             return False
+        subagents = 0
         for call in calls:
             tool = self.regis.get(call.function.name)
-            if tool is None or tool.risky or tool.name not in SIDE_EFFECT_FREE_TOOLS:
+            if tool is None:
                 return False
-        return True
+            if tool.risky:
+                if tool.name not in PARALLEL_RISKY_TOOLS:
+                    return False
+                subagents += 1
+            elif tool.name not in SIDE_EFFECT_FREE_TOOLS:
+                return False
+        # Subagents run code and write files; do not overlap one with anything
+        # else, only with other subagents.
+        return subagents in (0, len(calls))
 
     def _dispatch(self, tool_call, cfg = CONFIG) -> ToolItem:
         tool = self.regis.get(tool_call.function.name)
@@ -339,7 +369,10 @@ class ToolExecution:
             return gate
 
         if tool.risky:
-            if not self.confirm(tool_call, cfg = cfg):
+            approved = self.approvals.get(tool_call.id)
+            if approved is None:
+                approved = self.confirm(tool_call, cfg = cfg)
+            if not approved:
                 return ToolItem(f'[{TAG.DENIED}]: the use of tool was denied by the user, please tell the user about this situation', False, TAG.DENIED)
         with self._lock:
             self.last_tool = current

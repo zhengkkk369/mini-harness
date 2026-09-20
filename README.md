@@ -16,7 +16,7 @@
 
 - **Small, but complete.** About 1,700 lines of Python: nine tools, context
   compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 330 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 338 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the nine tools, context compaction, configuration and the sandbox
   command builder.
@@ -28,9 +28,9 @@
   records every turn, tool call, retry and compaction. The measured cost of that
   trace is in [EXPERIMENTS.md](EXPERIMENTS.md).
 - **Concurrent where it is safe, refused where it is not.** Read-only tool
-  batches run in a thread pool; a policy layer refuses denied tools and commands
-  before approval, and there is a read-only mode. Finishing with unverified
-  edits costs one bounded extra turn.
+  batches and batches of subagents run in a thread pool; a policy layer refuses
+  denied tools and commands before approval, and there is a read-only mode.
+  Finishing with unverified edits costs one bounded extra turn.
 - **A practical baseline.** Evaluated on SWE-bench Verified and Terminal-Bench
   2.1 with DeepSeek V4 Flash. See the results below.
 - **Built for learning.** Follow the [agent loop](src/mini_harness/agent.py),
@@ -175,9 +175,13 @@ Patterns are matched against the `command` argument when the tool takes one, and
 against the raw arguments otherwise.
 
 Read-only tool batches (`read_file`, `grep_file`, `glob_file`) run concurrently,
-because they cannot affect each other. One write, one risky tool or one unknown
-name makes the whole batch serial. Results are returned in the order the model
-asked for them regardless, and the file-state bookkeeping is lock-protected.
+because they cannot affect each other. A batch of subagents does too: they are
+independent by construction and spend their time blocked on their own model
+calls. Anything else — a write, a shell call, an unknown name, or a subagent
+mixed with other tools — makes the whole batch serial. Results are returned in
+the order the model asked for them regardless, and the file-state bookkeeping is
+lock-protected. Approval for a batch is collected once per call, on the calling
+thread, before anything runs, so prompts never interleave.
 
 ```sh
 export MINI_HARNESS_PARALLEL_TOOLS=false   # force serial execution

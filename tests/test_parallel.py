@@ -13,6 +13,7 @@ import pytest
 
 from mini_harness.tool import box
 from mini_harness.tool.box import ToolDefinition
+from mini_harness.tool.tag import TAG
 from mini_harness.trace import TRACE
 from tests.conftest import REGISTRY, call, write
 
@@ -188,6 +189,113 @@ def test_a_write_tool_that_leaves_no_file_does_not_crash(cfg):
 
     assert result.ok is True
     assert execu.files == {}
+
+
+# --------------------------------------------------------------------------- subagents
+
+
+def subagent_call(call_id):
+    return call('run_subagent', call_id=call_id, task_description=f'task {call_id}',
+                prompt='look around', agent_type='explore_agent')
+
+
+def subagent_tool(function):
+    return ToolDefinition('run_subagent', 'stub subagent', box.RunSubAgentInput, function, True)
+
+
+def test_two_subagents_really_overlap(cfg):
+    gate = threading.Barrier(2, timeout=10)
+    seen = []
+
+    def slow_subagent(args, cfg=None):
+        seen.append(args.task_description)
+        gate.wait()
+        return 'summary'
+
+    execu = runner(cfg, run_subagent=subagent_tool(slow_subagent))
+
+    results = execu.execute_batch([subagent_call('c1'), subagent_call('c2')], cfg=cfg)
+
+    assert [r.content for r in results] == ['summary', 'summary']
+    assert sorted(seen) == ['task c1', 'task c2']
+
+
+def test_a_subagent_batch_is_parallelizable(cfg):
+    assert runner(cfg)._parallelizable([subagent_call('c1'), subagent_call('c2')], cfg) is True
+
+
+def test_a_subagent_mixed_with_a_read_stays_serial(cfg):
+    calls = [call('read_file', file_path='a.py'), subagent_call('c1')]
+    assert runner(cfg)._parallelizable(calls, cfg) is False
+
+
+def test_two_shell_calls_stay_serial(cfg):
+    """run_bash is risky but not independent: order may matter."""
+    calls = [call('run_bash', command='ls'), call('run_bash', command='pwd')]
+    assert runner(cfg)._parallelizable(calls, cfg) is False
+
+
+def test_subagents_are_serial_when_parallelism_is_off(cfg_factory):
+    cfg = cfg_factory(parallel_tools=False)
+    assert runner(cfg)._parallelizable([subagent_call('c1'), subagent_call('c2')], cfg) is False
+
+
+def test_approval_is_collected_once_per_call_before_any_run(cfg):
+    order = []
+
+    def confirm(tool_call, cfg=None):
+        order.append(('asked', tool_call.id))
+        return True
+
+    def subagent(args, cfg=None):
+        order.append(('ran', args.task_description))
+        return 'summary'
+
+    execu = runner(cfg, run_subagent=subagent_tool(subagent))
+    execu.confirm = confirm
+
+    execu.execute_batch([subagent_call('c1'), subagent_call('c2')], cfg=cfg)
+
+    assert order[:2] == [('asked', 'c1'), ('asked', 'c2')]
+    assert len(order) == 4
+
+
+def test_a_denied_subagent_falls_back_to_the_serial_path(cfg):
+    asked = []
+
+    def confirm(tool_call, cfg=None):
+        asked.append(tool_call.id)
+        return tool_call.id != 'c1'
+
+    def subagent(args, cfg=None):
+        return 'summary'
+
+    execu = runner(cfg, run_subagent=subagent_tool(subagent))
+    execu.confirm = confirm
+
+    results = execu.execute_batch([subagent_call('c1'), subagent_call('c2')], cfg=cfg)
+
+    assert results[0].tag == TAG.DENIED
+    assert results[1].ok is True
+    assert asked == ['c1', 'c2']      # asked once each, never twice
+
+
+def test_an_approved_subagent_is_not_asked_again(cfg):
+    asked = []
+
+    def confirm(tool_call, cfg=None):
+        asked.append(tool_call.id)
+        return True
+
+    def subagent(args, cfg=None):
+        return 'summary'
+
+    execu = runner(cfg, run_subagent=subagent_tool(subagent))
+    execu.confirm = confirm
+
+    execu.execute_batch([subagent_call('c1')], cfg=cfg)
+
+    assert asked == ['c1']
 
 
 # --------------------------------------------------------------------------- trace

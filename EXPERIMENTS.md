@@ -1,7 +1,8 @@
 # Harness experiments
 
 Measurements of the mini-harness mechanisms added in this repository: parallel
-tool execution, the event trace, the verification loop, and the dispatch policy.
+tool execution, subagent concurrency, the event trace, the verification loop,
+and the dispatch policy.
 
 ## What these numbers are, and what they are not
 
@@ -46,9 +47,9 @@ not instant (a network fetch, a subprocess, a large file). Six calls with
 
 | Injected latency | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: |
-| 0 ms | 32.31 ms | 23.48 ms | 1.38x |
-| 5 ms | 67.62 ms | 25.72 ms | 2.63x |
-| 20 ms | 156.46 ms | 41.50 ms | 3.77x |
+| 0 ms | 32.18 ms | 22.75 ms | 1.41x |
+| 5 ms | 66.59 ms | 26.60 ms | 2.50x |
+| 20 ms | 157.55 ms | 40.95 ms | 3.85x |
 
 Reading this:
 
@@ -56,33 +57,55 @@ Reading this:
   the expected shape: with six calls in flight and no shared bottleneck, the
   floor is one call's latency rather than six.
 - The speedup never reaches the ideal 6x. At 20 ms the concurrent batch takes
-  41.5 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
+  41.0 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
   (argument validation, the file-state record, output handling) still runs under
   the GIL, and the pool has its own start-up cost.
-- Even with **no injected latency** the concurrent path is 1.38x faster, so real
+- Even with **no injected latency** the concurrent path is 1.41x faster, so real
   file reads and MD5 digests do overlap. I did not profile further, so I cannot
   attribute that split between filesystem concurrency and `hashlib` releasing the
   GIL.
-- A batch is only ever overlapped when every call is side-effect free
-  (`read_file`, `grep_file`, `glob_file`). One write, one risky tool, or one
-  unknown name makes the whole batch serial, which is asserted by
+- A batch is only ever overlapped when every call is safe to overlap:
+  side-effect free (`read_file`, `grep_file`, `glob_file`), or a batch consisting
+  entirely of subagents. One write, one shell call, one unknown name, or a mix of
+  subagents with anything else makes the whole batch serial, which is asserted by
   `tests/test_parallel.py`.
 
-## 2. Event trace
+## 2. Subagent concurrency
+
+A batch of four `run_subagent` calls through the same path. A subagent spends
+its time blocked on its own model calls, which is what the injected latency
+models.
+
+| Injected latency | Serial (median) | Concurrent (median) | Speedup |
+| ---: | ---: | ---: | ---: |
+| 20 ms | 82.23 ms | 23.95 ms | 3.43x |
+| 100 ms | 402.64 ms | 103.90 ms | 3.88x |
+
+This is close to the ideal 4x, and closer than the read batch gets, because the
+stubbed subagent releases the GIL for the whole of its latency while a file read
+does real CPU work around its I/O. It is the clearest case for overlapping:
+independent units of work that each wait on the network.
+
+Approval is collected for every call **before** the batch fans out, on the
+calling thread, so prompts never interleave and a denial cannot race an
+approval. A single denial drops the whole batch back to the serial path, which
+keeps a refusal reading exactly as it did before this existed.
+
+## 3. Event trace
 
 Twenty tool turns plus a final answer, with the trace off and on. Each tool turn
 emits `turn`, `usage`, `tool_call` and `tool_result`; the run adds `run_start`
-and `run_end`.
+and `run_end`, so about 82 events.
 
 | Trace | Median | Min | Max | Bytes written |
 | --- | ---: | ---: | ---: | ---: |
-| off | 92.80 ms | 86.13 ms | 102.77 ms | 0 |
-| on | 105.95 ms | 96.40 ms | 171.32 ms | 10,882 |
-| overhead | **+13.15 ms** | | | |
+| off | 90.22 ms | 88.47 ms | 106.26 ms | 0 |
+| on | 104.99 ms | 97.48 ms | 135.74 ms | 10,871 |
+| overhead | **+14.77 ms** | | | |
 
-That is roughly 0.16 ms and 130 bytes per event across ~82 events, or about 14%
-of a run whose only work is tool calls. The variance is high (max 171 ms against
-a 96 ms minimum) because the trace writes to disk on every event.
+That is roughly 0.18 ms and 133 bytes per event, or about 16% of a run whose only
+work is tool calls. The variance is high (max 135.74 ms against a 97.48 ms
+minimum) because the trace writes to disk on every event.
 
 ### This experiment found and fixed a real defect
 
@@ -95,7 +118,7 @@ for **every** event. The same experiment measured:
 | persistent handle, flushed per event (current) | +9.23 ms | 10,882 |
 
 Both of those figures come from the same `--repeats 5` run of the same
-experiment in this session; the recorded 7-repeat figure above is +13.15 ms. The
+experiment in this session; the recorded 7-repeat figure above is +14.77 ms. The
 per-event `open`/`close` cost about 2 ms each on this platform, which is more
 than the event is worth, so `Trace` now opens the file once per run and flushes
 after each event. Flushing is kept so a crash still leaves everything already
@@ -104,7 +127,7 @@ written on disk.
 This is the clearest argument for having run the experiment at all: the feature
 looked correct and its cost was only visible when measured.
 
-## 3. Verification loop
+## 4. Verification loop
 
 A scripted agent that reads a file, edits it, and then stops. `verify_required`
 is on by default; the nudge is bounded by `verify_nudges` (1 here).
@@ -134,7 +157,7 @@ not that it was a good one. A model could satisfy it with `echo`. That is a real
 limitation of a mechanical check, and it is why the result is reported as a
 `verified` flag rather than being treated as proof.
 
-## 4. Dispatch policy
+## 5. Dispatch policy
 
 Policy decisions for a representative set of calls, with
 `policy_deny_tools=('run_sandbox',)` and `policy_deny_patterns=('rm -rf*',)`.
@@ -162,14 +185,16 @@ In `read_only` mode the same rules deny `write_file`, `edit_file`, `run_bash`,
 - **One machine, one platform.** Timings come from a single 4-core Windows
   laptop. The parallel speedup in particular will vary with core count, disk and
   the tool mix.
-- **Synthetic latency.** The parallel experiment injects sleeps rather than
-  using genuinely slow tools, because local file reads are too fast to show the
-  effect. The `0 ms` row is the only one with no injected latency.
+- **Synthetic latency.** Both concurrency experiments inject sleeps rather than
+  using genuinely slow work, because local file reads are too fast to show the
+  effect. The `0 ms` row is the only one with no injected latency. The subagent
+  stub returns a fixed string instead of running a nested agent, so it measures
+  the batch scheduler, not real subagent work.
 - **Parallel batches change event order.** Within one overlapped batch the
   `tool_call`/`tool_result` events interleave nondeterministically. Sequence
   numbers stay contiguous (they are assigned under a lock) and result order
-  always matches the order the model asked for, but the file is not byte-stable
-  between runs.
+  always matches the order the model asked for, but the trace file is not
+  byte-stable between runs.
 - **The 21-turn trace figure is small.** ~82 events is a short run; a long
   session writes proportionally more, and flush-per-event cost scales with it.
 

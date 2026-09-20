@@ -134,12 +134,16 @@ def patch_openai(monkeypatch):
     return patch
 
 
-def call(name, **arguments):
-    """A stand-in for an OpenAI tool_call object."""
+def call(name, call_id=None, **arguments):
+    """A stand-in for an OpenAI tool_call object.
+
+    Real call ids are unique; pass ``call_id`` when a test issues the same tool
+    more than once and something keys on the id.
+    """
     import json
 
     return SimpleNamespace(
-        id=f"call_{name}",
+        id=call_id or f"call_{name}",
         function=SimpleNamespace(name=name, arguments=json.dumps(arguments)),
     )
 

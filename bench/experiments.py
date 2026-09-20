@@ -47,9 +47,14 @@ BASH_TOOL = next(tool for tool in TOOLS if tool.name == 'run_bash')
 # --------------------------------------------------------------------------- helpers
 
 
-def call(name, **arguments):
-    return SimpleNamespace(id=f'call_{name}', function=SimpleNamespace(
+def call(name, call_id=None, **arguments):
+    return SimpleNamespace(id=call_id or f'call_{name}', function=SimpleNamespace(
         name=name, arguments=json.dumps(arguments)))
+
+
+def subagent_call(index):
+    return call('run_subagent', call_id=f'sub{index}', task_description=f'task {index}',
+                prompt='explore the workspace', agent_type='explore_agent')
 
 
 def message(content='', tool_calls=None):
@@ -159,6 +164,36 @@ def experiment_parallel(repeats, calls, latencies):
             cfg = config_for(workdir, parallel_tools=parallel, max_parallel_tools=calls)
             execu = executor_with(cfg, tool)
             batch = read_batch(calls)
+            med, low, high = median_seconds(
+                repeats, lambda e=execu, c=cfg, b=batch: e.execute_batch(b, cfg=c))
+            row[label] = {'median_ms': med * 1000, 'min_ms': low * 1000, 'max_ms': high * 1000}
+        row['speedup'] = row['serial']['median_ms'] / row['parallel']['median_ms']
+        rows.append(row)
+    return rows
+
+
+def experiment_subagents(repeats, count, latencies):
+    """Serial vs concurrent wall time for a batch of subagent calls.
+
+    A subagent spends its time blocked on its own model calls, which is what the
+    injected latency models here.
+    """
+    workdir = WORK / 'subagents'
+    workdir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for latency in latencies:
+        def delayed_subagent(args, cfg=None, _delay=latency):
+            if _delay:
+                time.sleep(_delay)
+            return 'summary'
+
+        tool = ToolDefinition('run_subagent', 'timed subagent', box.RunSubAgentInput,
+                              delayed_subagent, True)
+        row = {'latency_ms': latency * 1000, 'calls': count}
+        for label, parallel in (('serial', False), ('parallel', True)):
+            cfg = config_for(workdir, parallel_tools=parallel, max_parallel_tools=count)
+            execu = executor_with(cfg, tool)
+            batch = [subagent_call(i) for i in range(count)]
             med, low, high = median_seconds(
                 repeats, lambda e=execu, c=cfg, b=batch: e.execute_batch(b, cfg=c))
             row[label] = {'median_ms': med * 1000, 'min_ms': low * 1000, 'max_ms': high * 1000}
@@ -295,6 +330,14 @@ def render(results):
         lines.append(f"| {row['latency_ms']:.0f} ms | {row['calls']} | "
                      f"{row['serial']['median_ms']:.2f} | {row['parallel']['median_ms']:.2f} | "
                      f"{row['speedup']:.2f}x |")
+    lines += ['', '## Subagent concurrency', '',
+              'Batch of run_subagent calls through ToolExecution.execute_batch.',
+              '', '| injected latency | calls | serial (ms) | concurrent (ms) | speedup |',
+              '| ---: | ---: | ---: | ---: | ---: |']
+    for row in results['subagents']:
+        lines.append(f"| {row['latency_ms']:.0f} ms | {row['calls']} | "
+                     f"{row['serial']['median_ms']:.2f} | {row['parallel']['median_ms']:.2f} | "
+                     f"{row['speedup']:.2f}x |")
     lines += ['', '## Event trace', '', '| trace | median (ms) | min (ms) | max (ms) | bytes |',
               '| --- | ---: | ---: | ---: | ---: |']
     for row in results['trace']:
@@ -320,6 +363,7 @@ def main():
     parser.add_argument('--out', default='EXPERIMENTS.json', help='where to write the raw results')
     parser.add_argument('--repeats', type=int, default=7, help='timed runs per configuration')
     parser.add_argument('--calls', type=int, default=6, help='calls per read batch')
+    parser.add_argument('--subagents', type=int, default=4, help='subagents per batch')
     parser.add_argument('--turns', type=int, default=20, help='tool turns per trace run')
     args = parser.parse_args()
 
@@ -330,6 +374,7 @@ def main():
         'platform': sys.platform,
         'repeats': args.repeats,
         'parallel': experiment_parallel(args.repeats, args.calls, (0.0, 0.005, 0.02)),
+        'subagents': experiment_subagents(args.repeats, args.subagents, (0.02, 0.1)),
         'trace': experiment_trace(args.repeats, args.turns),
         'verify': experiment_verify(args.repeats),
         'policy': experiment_policy(),
