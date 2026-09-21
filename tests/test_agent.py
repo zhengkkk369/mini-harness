@@ -13,6 +13,7 @@ from mini_harness.agent import DeepSeekAgent, Result
 from mini_harness.tool import box
 from mini_harness.tool.box import TOOLS, ToolDefinition
 from mini_harness.tool.tag import OUTCOME
+from mini_harness.trace import TRACE
 from tests.conftest import REGISTRY, call, executor, write
 
 
@@ -1009,3 +1010,45 @@ def test_run_summary_separates_its_fields(cfg, workspace, monkeypatch, capsys):
     assert "[failed]: {'stale': 1}, [last_prompt]: 900" in summary
     assert "[wall]: 12.3s" in summary
     assert "[err]: \n" in summary + "\n"
+
+
+# --------------------------------------------------------------------------- repl lifetime
+
+
+def repl(cfg, client, monkeypatch, replies):
+    agent, fake = make_agent(cfg)
+    answers = iter(replies)
+    monkeypatch.setattr("builtins.input", lambda *_: next(answers))
+    monkeypatch.setattr("mini_harness.agent.OpenAI", lambda **_: fake)
+    return agent
+
+
+def test_the_repl_closes_the_trace_when_the_user_quits(cfg_factory, session_dir, monkeypatch):
+    path = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(path))
+    agent = repl(cfg, None, monkeypatch, ["quit"])
+
+    agent.run(cfg=cfg)
+
+    assert TRACE.enabled is False
+    assert TRACE._handle is None
+    # An open handle keeps the file locked on Windows; deleting it proves the
+    # handle is really gone rather than merely flagged as disabled.
+    path.unlink()
+    assert not path.exists()
+
+
+def test_the_repl_closes_the_trace_on_end_of_input(cfg_factory, session_dir, monkeypatch):
+    path = session_dir / "trace.jsonl"
+    cfg = cfg_factory(trace_path=str(path))
+    agent = repl(cfg, None, monkeypatch, [])
+
+    def end_of_input(*_):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", end_of_input)
+    agent.run(cfg=cfg)
+
+    assert TRACE._handle is None
+    path.unlink()
+    assert not path.exists()

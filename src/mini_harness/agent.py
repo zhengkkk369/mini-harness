@@ -419,6 +419,16 @@ class DeepSeekAgent:
             base_url = cfg.base_url,
             max_retries = 0
         )
+        # Every exit from the loop -- quit, EOF, a double interrupt -- closes the
+        # trace here, so a REPL session does not leave the file handle open (and
+        # on Windows, locked) for the rest of the process's life.
+        try:
+            self._repl(client, cfg = cfg)
+        finally:
+            TRACE.close()
+        return
+
+    def _repl(self, client: OpenAI, cfg = CONFIG) -> None:
         pending_exits = False
         while True:
             try:
