@@ -214,6 +214,26 @@ the order the model asked for them regardless, and the file-state bookkeeping is
 lock-protected. Approval for a batch is collected once per call, on the calling
 thread, before anything runs, so prompts never interleave.
 
+A subagent's result is prose with a trailer, because the model is the main reader
+and the harness is the second:
+
+```
+[explore_agent] finished in 3 turn(s) with 2 tool call(s)
+
+The parser lives in src/parse.py and reads its limits from config.py.
+
+[subagent report] {"agent": "explore_agent", "ok": true, "reason": "", "turns": 3, "tools": 2,
+ "edited": [], "prompt": 4120, "completion": 380, "seconds": 6.4}
+```
+
+`ok: false` with a reason (`exhausted`, `budget-tokens`, `budget-wall`,
+`budget-cost`) is what separates "the explore agent answered" from "it ran out of
+turns", which a bare string could not say; `edited` lists the files a
+write-capable subagent actually changed, refusals excluded. The same fields go
+into the `subagent_end` trace event, and `bench/mini_bench.py` reports
+subagent outcomes per task so a run that passed with a failed subtask is visible
+as such.
+
 ```sh
 export MINI_HARNESS_PARALLEL_TOOLS=false   # force serial execution
 export MINI_HARNESS_MAX_PARALLEL_TOOLS=4   # workers per batch
@@ -542,6 +562,7 @@ gh workflow run CI
 | `tests/test_trace.py` | the JSONL event log, flushing and failure handling |
 | `tests/test_contract.py` | the tool-definition and registry contracts |
 | `tests/test_parallel.py` | batch overlap (proved with a barrier, not a stopwatch) and eligibility |
+| `tests/test_subagent.py` | the subagent report: what it edited, why it stopped, and that the trace agrees |
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
 | `tests/test_embed.py` | the embedders, the cache, rank fusion, and the lexical fallback |

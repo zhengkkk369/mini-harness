@@ -210,8 +210,8 @@ def test_a_subagent_stops_when_the_run_budget_is_spent(cfg, monkeypatch):
                                                    prompt = 'look', agent_type = 'explore_agent'),
                               cfg = cfg)
 
-    assert 'stopped' in answer
-    assert 'tokens budget' in answer
+    assert 'did not finish' in answer
+    assert 'the tokens budget was spent' in answer
     assert sub.calls == 0, 'the subagent should not have called the model at all'
 
 
@@ -224,7 +224,7 @@ def test_a_subagent_without_a_budget_still_runs(cfg, monkeypatch):
                                                    prompt = 'look', agent_type = 'explore_agent'),
                               cfg = cfg)
 
-    assert answer == 'the subagent answer'
+    assert 'the subagent answer' in answer
     assert sub.calls == 1
     assert ACCOUNT.prompt_total == 700
 

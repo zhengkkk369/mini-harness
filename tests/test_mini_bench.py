@@ -9,6 +9,7 @@ The checkers run the sandbox with a subprocess and read its output, so the whole
 module skips in an environment that forbids capturing a child process.
 """
 
+import json
 import subprocess
 import sys
 
@@ -208,3 +209,66 @@ def test_the_reference_suites_import_from_the_sandbox_root():
     for suite in (mini_bench.WINDOW_SUITE, mini_bench.ROUNDING_SUITE, mini_bench.VARIANCE_SUITE):
         assert 'import unittest' in suite
         assert 'sys.path' not in suite
+
+
+# ------------------------------------------------------------------ reading the trace back
+
+
+def trace_file(tmp_path, *events):
+    path = tmp_path / 'trace.jsonl'
+    path.write_text(''.join(json.dumps(event) + '\n' for event in events), encoding='utf-8')
+    return path
+
+
+def test_trace_counts_still_counts(tmp_path):
+    path = trace_file(tmp_path, {'event': 'turn'}, {'event': 'tool_call'}, {'event': 'turn'})
+
+    assert mini_bench.trace_counts(path) == {'turn': 2, 'tool_call': 1}
+
+
+def test_trace_events_keeps_the_fields_a_count_cannot_carry(tmp_path):
+    path = trace_file(tmp_path,
+                      {'event': 'subagent_end', 'agent': 'explore_agent', 'ok': True,
+                       'reason': '', 'turns': 2},
+                      {'event': 'turn'},
+                      {'event': 'subagent_end', 'agent': 'coding_agent', 'ok': False,
+                       'reason': 'exhausted', 'turns': 20})
+
+    ends = mini_bench.trace_events(path, 'subagent_end')
+
+    assert [event['agent'] for event in ends] == ['explore_agent', 'coding_agent']
+    assert ends[1]['reason'] == 'exhausted'
+
+
+def test_a_missing_or_broken_trace_is_not_an_error(tmp_path):
+    assert mini_bench.trace_events(tmp_path / 'absent.jsonl', 'subagent_end') == []
+    broken = tmp_path / 'broken.jsonl'
+    broken.write_text('not json\n{"event": "turn"}\n', encoding='utf-8')
+
+    assert mini_bench.trace_events(broken, 'turn') == [{'event': 'turn'}]
+
+
+def test_the_report_shows_subagent_outcomes(tmp_path):
+    rows = [
+        {'task': 't', 'config': 'baseline', 'repeat': 0, 'passed': True, 'detail': '',
+         'outcome': 'completed', 'turns': 4, 'calls': 4, 'errors_by_tag': {},
+         'prompt_tokens': 1, 'completion_tokens': 1, 'cost': 0.0, 'verified': True,
+         'mutations': 1, 'nudges': 0, 'parallel_batches': 0, 'seconds': 1.0,
+         'subagents': 2, 'subagent_failures': ['coding_agent:exhausted']},
+    ]
+
+    report = mini_bench.render(rows)
+
+    assert '| subagents |' in report
+    assert '| 1/2 |' in report
+
+
+def test_a_run_without_subagents_shows_a_dash(tmp_path):
+    rows = [
+        {'task': 't', 'config': 'baseline', 'repeat': 0, 'passed': True, 'detail': '',
+         'outcome': 'completed', 'turns': 4, 'calls': 4, 'errors_by_tag': {},
+         'prompt_tokens': 1, 'completion_tokens': 1, 'cost': 0.0, 'verified': True,
+         'mutations': 1, 'nudges': 0, 'parallel_batches': 0, 'seconds': 1.0},
+    ]
+
+    assert '| - |' in mini_bench.render(rows)

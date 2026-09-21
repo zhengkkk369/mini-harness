@@ -805,6 +805,47 @@ class RunSubAgentInput(BaseModel):
     prompt: Nonblank = Field(description = 'the user prompt which you want to give subagent')
     agent_type: AgentType = Field(description = 'the agent type which you want use, including explore_agent(explore, read and find the file and file content based on the task), coding_agent (create, code and program the file based on the task) and planning_agent (read, analyze and make a plan to better finish the task)')
 
+def _edited_path(tool_call) -> str|None:
+    """The file a write-shaped call targeted, when it can be read from the call."""
+    if tool_call.function.name not in WRITE_TOOLS:
+        return None
+    try:
+        arguments = json.loads(tool_call.function.arguments or '{}')
+    except (TypeError, ValueError):
+        return None
+    path = arguments.get('file_path') if isinstance(arguments, dict) else None
+    return path if isinstance(path, str) and path else None
+
+
+def subagent_report(*, agent: str, ok: bool, reason: str, turns: int, tools: int,
+                    edited: list, prompt: int, completion: int, seconds: float,
+                    answer: str, detail: str = '') -> str:
+    """A subagent's result: prose for the model, then a line for the harness.
+
+    The caller only ever sees one string, and the model is the main reader, so
+    the answer comes first and a one-line summary of what it cost and whether it
+    finished follows. The trailer is what lets the harness -- a benchmark, a
+    trace reader -- count subagent outcomes without parsing prose.
+
+    ``reason`` is the code the trace also uses (``exhausted``, ``budget-cost``);
+    ``detail`` is the sentence a person reads.
+    """
+    wrote = sorted({path for path in edited if path})
+    if ok:
+        head = f'[{agent}] finished in {turns} turn(s) with {tools} tool call(s)'
+    else:
+        head = (f'[{agent}] did not finish: {detail or reason} '
+                f'after {turns} turn(s) and {tools} tool call(s)')
+    if wrote:
+        head += f'; edited {len(wrote)} file(s): ' + ', '.join(wrote)
+    body = f'{head}\n\n{answer}'.rstrip() if answer else head
+    trailer = json.dumps({'agent': agent, 'ok': ok, 'reason': reason, 'detail': detail,
+                          'turns': turns, 'tools': tools, 'edited': wrote,
+                          'prompt': prompt, 'completion': completion,
+                          'seconds': round(seconds, 3)}, ensure_ascii = False)
+    return f'{body}\n\n[subagent report] {trailer}'
+
+
 def run_subagent(inp: RunSubAgentInput, cfg = CONFIG) -> str:
     full_tool_list = _to_api_tool(TOOLS)
     config = SUBAGENT.agent_table.get(inp.agent_type.value)
@@ -813,6 +854,8 @@ def run_subagent(inp: RunSubAgentInput, cfg = CONFIG) -> str:
     tool_list = [t for t in full_tool_list if t['function']['name'] in config['tools']]
     regis = {t.name: t for t in TOOLS if t.name in config['tools']}
     tool_count = 0
+    turns = 0
+    edited = []
     sub_message = [
         {
             'role': 'system',
@@ -839,6 +882,14 @@ completed the task by giving the summary and analyzing report
     executer = ToolExecution(regis, _for_sub, cfg = cfg)
     spent_prompt = spent_completion = 0
     source = f'{SOURCE_SUBAGENT}:{inp.agent_type.value}'
+
+    def finished(ok: bool, reason: str, answer: str, detail: str = '') -> str:
+        return subagent_report(agent = inp.agent_type.value, ok = ok, reason = reason,
+                               detail = detail, turns = turns, tools = tool_count,
+                               edited = edited, prompt = spent_prompt,
+                               completion = spent_completion,
+                               seconds = time.time() - start, answer = answer)
+
     for turn in range(cfg.max_turns_sub):
         spent = ACCOUNT.exceeded()
         if spent is not None:
@@ -846,11 +897,12 @@ completed the task by giving the summary and analyzing report
             # would spend money no budget is watching.
             TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
                        seconds = round(time.time() - start, 4), ok = False,
-                       reason = f'{spent}-budget', prompt = spent_prompt,
-                       completion = spent_completion)
-            return (f'[subagent {inp.agent_type.value} stopped]: the {spent} budget was spent '
-                    f'after {tool_count} tool call(s); the subtask is unfinished. Do not retry it '
-                    f'without changing the approach.')
+                       reason = f'budget-{spent}', turns = turns, prompt = spent_prompt,
+                       completion = spent_completion, edited = edited)
+            return finished(False, f'budget-{spent}',
+                            'Do not retry this subtask without changing the approach.',
+                            detail = f'the {spent} budget was spent before it could continue')
+        turns += 1
         response = retry_call(lambda: client.chat.completions.create(
             **cfg.request_options(sub=True),
             messages = cfg.request_messages(sub_message),
@@ -870,6 +922,10 @@ completed the task by giving the summary and analyzing report
                 res = executer.execute_tool(tool_call, cfg = cfg)
                 content = CLIP.clip(res.content, cfg = cfg)
                 tool_count += 1
+                if res.ok:
+                    target = _edited_path(tool_call)
+                    if target is not None:
+                        edited.append(target)
                 sub_message.append(
                     {'role': 'tool', 'tool_call_id': tool_call.id, 'content': content}
                 )
@@ -880,14 +936,17 @@ completed the task by giving the summary and analyzing report
             end = time.time() -start
             print(f'[{inp.agent_type.value}]: {inp.task_description} -- {tool_count} tools -- {end:.1f}s')
             TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
-                       seconds = round(end, 4), ok = True, prompt = spent_prompt,
-                       completion = spent_completion)
-            return message.content
+                       seconds = round(end, 4), ok = True, reason = '', turns = turns,
+                       prompt = spent_prompt, completion = spent_completion, edited = edited)
+            return finished(True, '', message.content or '')
     else:
         TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
                    seconds = round(time.time() - start, 4), ok = False, reason = 'exhausted',
-                   prompt = spent_prompt, completion = spent_completion)
-        return f'[agent done]: the agent run out of the turns for the actions, the task is incompleted'
+                   turns = turns, prompt = spent_prompt, completion = spent_completion,
+                   edited = edited)
+        return finished(False, 'exhausted',
+                        'The subtask is unfinished; narrow it or do it yourself.',
+                        detail = f'the {cfg.max_turns_sub}-turn limit was reached')
     
 
 def _signature(function: Callable):

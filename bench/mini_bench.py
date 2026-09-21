@@ -73,9 +73,18 @@ def tail(text: str, limit: int = 240) -> str:
 
 def trace_counts(path: Path) -> dict:
     """Count the events a run emitted, so the mechanism is visible per run."""
-    counts = {}
+    return {name: len(events) for name, events in _by_kind(path).items()}
+
+
+def trace_events(path: Path, kind: str) -> list:
+    """The events of one kind, in order, for the fields a count cannot carry."""
+    return _by_kind(path).get(kind, [])
+
+
+def _by_kind(path: Path) -> dict:
+    grouped = {}
     if not path.exists():
-        return counts
+        return grouped
     for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
         if not line.strip():
             continue
@@ -83,9 +92,8 @@ def trace_counts(path: Path) -> dict:
             event = json.loads(line)
         except ValueError:
             continue
-        name = event.get('event')
-        counts[name] = counts.get(name, 0) + 1
-    return counts
+        grouped.setdefault(event.get('event'), []).append(event)
+    return grouped
 
 
 # --------------------------------------------------------------------------- tasks
@@ -633,6 +641,7 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         ok, detail = False, f'check raised {type(error).__name__}: {error}'
 
     counts = trace_counts(run_dir / 'trace.jsonl')
+    subagents = trace_events(run_dir / 'trace.jsonl', 'subagent_end')
     return {
         'task': task.name,
         'config': name,
@@ -650,6 +659,12 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         'mutations': result.mutations,
         'nudges': counts.get('verify_nudge', 0),
         'parallel_batches': counts.get('batch_parallel', 0),
+        # A subagent that ran out of turns is not a failed tool call, so the
+        # task can pass while a subtask did not. Recording both keeps that
+        # visible instead of folding it into the pass/fail column.
+        'subagents': len(subagents),
+        'subagent_failures': [f"{event.get('agent')}:{event.get('reason')}"
+                              for event in subagents if not event.get('ok')],
         'seconds': round(elapsed, 1),
     }
 
@@ -660,8 +675,8 @@ def render(rows: list) -> str:
         by_config.setdefault(row['config'], []).append(row)
 
     lines = ['# mini-bench', '',
-             '| config | task | pass | turns (median) | verified | nudges | parallel |',
-             '| --- | --- | :-: | ---: | :-: | ---: | ---: |']
+             '| config | task | pass | turns (median) | verified | nudges | parallel | subagents |',
+             '| --- | --- | :-: | ---: | :-: | ---: | ---: | :-: |']
     for name, group in by_config.items():
         tasks = {}
         for row in group:
@@ -677,9 +692,12 @@ def render(rows: list) -> str:
                         else f"{sum(1 for r in edited if r['verified'])}/{len(edited)}")
             nudges = sum(r['nudges'] for r in runs)
             parallel = sum(r['parallel_batches'] for r in runs)
+            total = sum(r.get('subagents', 0) for r in runs)
+            failures = sum(len(r.get('subagent_failures') or []) for r in runs)
+            subagents = f"{total - failures}/{total}" if total else '-'
             lines.append(f"| {name} | {task} | {passed}/{len(runs)} | "
                          f"{turns[len(turns) // 2]} | {verified} | "
-                         f"{nudges} | {parallel} |")
+                         f"{nudges} | {parallel} | {subagents} |")
 
     lines += ['', '| config | passed | rate | runs | nudges | total tokens | total cost |',
               '| --- | ---: | ---: | ---: | ---: | ---: | ---: |']
