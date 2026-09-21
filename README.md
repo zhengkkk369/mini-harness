@@ -242,6 +242,46 @@ export MINI_HARNESS_RECALL_LIMIT=10     # matches per query, default 5
 export MINI_HARNESS_RECALL_SNIPPET=800  # characters per match, default 400
 ```
 
+### The ranking is pluggable
+
+Lexical scoring is exact, free and dependency-free, but it cannot match a query
+to a message that says the same thing in different words. `recall_backend`
+selects how the archive is ranked:
+
+| Backend | Ranking | Needs |
+| --- | --- | --- |
+| `lexical` (default) | term overlap weighted by IDF | nothing |
+| `hash` | deterministic local vectors | nothing; offline stand-in for the vector path |
+| `vector` | cosine similarity between embeddings | an embeddings endpoint |
+| `hybrid` | the two rankings fused by reciprocal rank | an embeddings endpoint |
+
+```sh
+export MINI_HARNESS_RECALL_BACKEND=hybrid
+export MINI_HARNESS_EMBED_MODEL=text-embedding-3-small
+export MINI_HARNESS_EMBED_BASE_URL=https://api.openai.com/v1   # an /embeddings provider
+export MINI_HARNESS_EMBED_API_KEY=...                          # defaults to the main key
+export MINI_HARNESS_EMBED_BATCH=96                             # texts per request
+```
+
+The default provider for this harness serves no `/embeddings` route, so `vector`
+and `hybrid` need `embed_base_url` pointed at a provider that does. `hybrid` is
+the safe choice of the two: the lexical ranking keeps its place, and the vector
+half can still surface a message lexical scoring missed.
+
+Two things worth knowing before switching:
+
+- **Embedding sends the archive to that provider.** It is the conversation
+  compaction removed, so this is a data-egress decision, not just a cost one.
+- **The archive is embedded once.** Vectors are cached per text for the process,
+  unit-normalised on the way in, so a repeated query embeds nothing. A provider
+  failure is not fatal: the tool falls back to lexical ranking and says so in its
+  output, so a run never loses its memory to an API error.
+
+`hash` exists so the vector path, the cache and the fusion can be exercised
+without a network call. It hashes tokens, so it is a weaker lexical scorer, not a
+semantic one — [EXPERIMENTS.md](EXPERIMENTS.md) reports what it measures, and is
+explicit that it says nothing about the quality of a real embedding model.
+
 ## MCP servers
 
 Tools can also come from an [MCP](https://modelcontextprotocol.io) server: a
@@ -444,6 +484,7 @@ uv run --locked pytest
 | `tests/test_parallel.py` | batch overlap (proved with a barrier, not a stopwatch) and eligibility |
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
+| `tests/test_embed.py` | the embedders, the cache, rank fusion, and the lexical fallback |
 | `tests/test_selector.py` | the exposure budget, the ranking, `find_tools`, and the refusal of a hidden call |
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
 | `tests/test_history.py` | repairing a stored conversation so the API accepts it |

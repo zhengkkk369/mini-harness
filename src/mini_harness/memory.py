@@ -5,10 +5,12 @@ a few sentences. Until now the removed messages were only written to
 ``mini_harness_history.jsonl`` as an audit trail and never read again, so any
 detail the summary dropped was gone for the rest of the run.
 
-This module turns that journal into something queryable. Retrieval is plain
-lexical scoring -- token overlap weighted by inverse document frequency -- so it
-needs no model, no embeddings and no extra dependency, and the same query always
-returns the same answer.
+This module turns that journal into something queryable. The default retrieval
+is plain lexical scoring -- token overlap weighted by inverse document frequency
+-- so it needs no model, no embeddings and no extra dependency, and the same
+query always returns the same answer. The ranking is pluggable: see
+``mini_harness.embed`` for the vector backends and ``Memory.search`` for how the
+two are combined.
 
 The journal format is unchanged and stays compatible with what
 ``bench/atif.py`` reads back.
@@ -23,9 +25,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mini_harness.config import CONFIG
+from mini_harness.embed import dot
 
 JOURNAL_NAME = 'mini_harness_history.jsonl'
 TOKEN = re.compile(r'[A-Za-z0-9_]+')
+# Reciprocal rank fusion, with the standard constant: it keeps the head of each
+# ranking dominant without letting either list's raw scores dominate the other.
+RRF_K = 60
 
 def journal_for(session_path: str|Path|None, cfg = CONFIG) -> Path:
     """The journal belonging to a session file, or to the default one.
@@ -149,14 +155,61 @@ class Memory:
                 entries.append(MemoryEntry(len(entries), ts, role, text, tuple(tokens(text))))
         return entries
 
-    def search(self, query: str, limit: int = 5, role: str|None = None) -> list:
-        """Best matches first, ties broken by the order they were archived."""
+    def lexical_order(self, terms: set) -> list:
+        """(index, score) for every entry sharing a term, best first."""
+        return rank(terms, [entry.tokens for entry in self.entries()])
+
+    def vector_order(self, query: str, embedder) -> list:
+        """(index, similarity) for every entry, best first.
+
+        The embedder hands back unit vectors, so the comparison is a dot
+        product. Raises whatever the provider raises: the caller decides whether
+        a failed embedding is worth falling back to lexical ranking for.
+        """
+        entries = self.entries()
+        if not entries:
+            return []
+        vectors = embedder.embed([entry.text for entry in entries])
+        query_vector = embedder.embed_one(query)
+        scored = [(index, dot(query_vector, vector)) for index, vector in enumerate(vectors)]
+        scored = [(index, score) for index, score in scored if score > 0]
+        scored.sort(key = lambda pair: (-pair[1], pair[0]))
+        return scored
+
+    @staticmethod
+    def fuse(orders) -> list:
+        """Reciprocal rank fusion of several (index, score) rankings.
+
+        Raw scores from two different ranking functions are not comparable, so
+        only the positions are combined. An entry missing from one list simply
+        scores nothing there.
+        """
+        totals: dict = {}
+        for ordered in orders:
+            for position, (index, _) in enumerate(ordered, start = 1):
+                totals[index] = totals.get(index, 0.0) + 1.0 / (RRF_K + position)
+        return sorted(totals.items(), key = lambda pair: (-pair[1], pair[0]))
+
+    def search(self, query: str, limit: int = 5, role: str|None = None,
+               embedder = None, mode: str = 'lexical') -> list:
+        """Best matches first, ties broken by the order they were archived.
+
+        ``mode`` is the configured backend: ``lexical`` (the default),
+        ``vector``, or ``hybrid`` for the fusion of the two. The ``score`` on a
+        hit is comparable only within one call, and only for the same mode.
+        """
         entries = self.entries()
         terms = set(tokens(query))
         if not entries or not terms:
             return []
+        if mode == 'lexical' or embedder is None:
+            ordered = self.lexical_order(terms)
+        elif mode == 'vector':
+            ordered = self.vector_order(query, embedder)
+        else:
+            ordered = self.fuse([self.lexical_order(terms), self.vector_order(query, embedder)])
         hits = []
-        for index, score in rank(terms, [entry.tokens for entry in entries]):
+        for index, score in ordered:
             entry = entries[index]
             if role and entry.role != role:
                 continue

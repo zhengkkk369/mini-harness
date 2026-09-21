@@ -15,6 +15,7 @@ Experiments:
     verify     turns, nudges and the verified flag for the verification loop
     policy     which calls a deny policy refuses, and under which tag
     recall     whether recall ranks a planted detail first as the archive grows
+    vector     what the vector backend embeds and what it costs to search
     exposure   request schema payload of a tool surface, with and without a budget
 """
 
@@ -22,6 +23,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import os
 import shutil
 import statistics
@@ -39,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from mini_harness import agent as agent_module  # noqa: E402
 from mini_harness.agent import CORE_TOOLS, DeepSeekAgent  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
+from mini_harness.embed import HashEmbedder  # noqa: E402
 from mini_harness.memory import Memory  # noqa: E402
 from mini_harness.selector import SELECTION, select  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
@@ -315,9 +318,31 @@ FILLER = ('config cache worker queue schema index buffer handler parser session 
 
 
 def _distractors(count):
-    """Deterministic filler text, so the measurement is reproducible."""
+    """Deterministic filler text, so the measurement is reproducible.
+
+    Each line carries its index: without it the filler repeats every 15 lines
+    and the "800 distractor" row would really be a 15-document archive.
+    """
     return [f'{FILLER[i % len(FILLER)]} {FILLER[(i * 7) % len(FILLER)]} '
-            f'{FILLER[(i * 13) % len(FILLER)]}' for i in range(count)]
+            f'{FILLER[(i * 13) % len(FILLER)]} entry {i}' for i in range(count)]
+
+
+class CountingHash(HashEmbedder):
+    """The offline embedder, recording how many texts each call carried."""
+
+    def __init__(self):
+        super().__init__()
+        self.sizes = []
+        return
+
+    def _embed_many(self, texts):
+        self.sizes.append(len(texts))
+        return super()._embed_many(texts)
+
+
+def _provider_calls(sizes, batch):
+    """Provider round trips for those batch sizes, at the embedder's batch size."""
+    return sum(math.ceil(size / batch) for size in sizes if size)
 
 
 def experiment_recall(sizes):
@@ -452,6 +477,74 @@ def experiment_recovery(external, budget, task, want):
     }]
 
 
+def experiment_vector_recall(sizes, batch = 96):
+    """What the vector backend costs, and what the offline stand-in cannot say.
+
+    The embedder here is the deterministic hash one, so the ranking *quality* of
+    a real embeddings model is not measured by this at all. What is measured is
+    the plumbing: how many texts the archive costs on the first query, that a
+    repeated query costs nothing, and what the cosine scan adds to a search.
+    """
+    workdir = WORK / 'vector'
+    workdir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for size in sizes:
+        path = workdir / f'journal-{size}.jsonl'
+        removed = [{'role': 'tool', 'content': text} for text in _distractors(size)]
+        removed.extend({'role': 'user', 'content': fact} for _, fact in RECALL_FACTS)
+        path.write_text(json.dumps({'ts': 1.0, 'removed': removed}) + '\n', encoding='utf-8')
+        memory = Memory(path)
+
+        embedder = CountingHash()
+        query = RECALL_FACTS[0][0]
+        start = time.perf_counter()
+        memory.search(query, limit=3, embedder=embedder, mode='vector')
+        cold_ms = (time.perf_counter() - start) * 1000
+        archive_texts = sum(embedder.sizes)
+        archive_calls = _provider_calls(embedder.sizes, batch)
+
+        embedder.sizes.clear()
+        start = time.perf_counter()
+        memory.search(query, limit=3, embedder=embedder, mode='vector')
+        warm_ms = (time.perf_counter() - start) * 1000
+        repeat_texts = sum(embedder.sizes)
+        repeat_calls = _provider_calls(embedder.sizes, batch)
+
+        vector_ms, lexical_ms, hybrid_ms = [], [], []
+        top1 = {'lexical': 0, 'vector': 0, 'hybrid': 0}
+        for probe, fact in RECALL_FACTS:
+            for mode, samples in (('vector', vector_ms), ('hybrid', hybrid_ms)):
+                start = time.perf_counter()
+                hits = memory.search(probe, limit=3, embedder=embedder, mode=mode)
+                samples.append((time.perf_counter() - start) * 1000)
+                if hits and hits[0].text == fact:
+                    top1[mode] += 1
+            start = time.perf_counter()
+            hits = memory.search(probe, limit=3, mode='lexical')
+            lexical_ms.append((time.perf_counter() - start) * 1000)
+            if hits and hits[0].text == fact:
+                top1['lexical'] += 1
+
+        rows.append({
+            'distractors': size,
+            'entries': len(removed),
+            'archive_texts': archive_texts,
+            'archive_provider_calls': archive_calls,
+            'cold_query_ms': cold_ms,
+            'repeat_texts': repeat_texts,
+            'repeat_provider_calls': repeat_calls,
+            'warm_query_ms': warm_ms,
+            'lexical_ms': statistics.median(lexical_ms),
+            'vector_ms': statistics.median(vector_ms),
+            'hybrid_ms': statistics.median(hybrid_ms),
+            'queries': len(RECALL_FACTS),
+            'top1_lexical': top1['lexical'],
+            'top1_vector': top1['vector'],
+            'top1_hybrid': top1['hybrid'],
+        })
+    return rows
+
+
 def experiment_policy():
     """Which calls a deny policy refuses, and under which tag."""
     workdir = WORK / 'policy'
@@ -515,6 +608,23 @@ def render(results):
         lines.append(f"| {row['distractors']} | {row['entries']} | "
                      f"{row['top1']}/{row['queries']} | {row['top3']}/{row['queries']} | "
                      f"{row['search_ms']:.2f} ms |")
+    lines += ['', '## Vector retrieval cost', '',
+              'The archive embedded with the offline stand-in, at a batch size of 96. '
+              'Ranking quality is not measured here: the stand-in has no semantics.',
+              '', '| distractors | archived | archive texts | provider calls | cold query (ms) | '
+              'repeat texts | repeat calls | warm query (ms) |',
+              '| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for row in results['vector']:
+        lines.append(f"| {row['distractors']} | {row['entries']} | {row['archive_texts']} | "
+                     f"{row['archive_provider_calls']} | {row['cold_query_ms']:.2f} | "
+                     f"{row['repeat_texts']} | {row['repeat_provider_calls']} | {row['warm_query_ms']:.2f} |")
+    lines += ['', '| distractors | lexical (ms) | vector (ms) | hybrid (ms) | top-1 lexical | '
+              'top-1 vector | top-1 hybrid |',
+              '| ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for row in results['vector']:
+        lines.append(f"| {row['distractors']} | {row['lexical_ms']:.2f} | {row['vector_ms']:.2f} | "
+                     f"{row['hybrid_ms']:.2f} | {row['top1_lexical']}/{row['queries']} | "
+                     f"{row['top1_vector']}/{row['queries']} | {row['top1_hybrid']}/{row['queries']} |")
     lines += ['', '## Dispatch policy', '', '| call | ok | tag |', '| --- | --- | --- |']
     for row in results['policy']:
         lines.append(f"| {row['call']} | {row['ok']} | {row['tag']} |")
@@ -556,6 +666,7 @@ def main():
         'trace': experiment_trace(args.repeats, args.turns),
         'verify': experiment_verify(args.repeats),
         'recall': experiment_recall((50, 200, 800)),
+        'vector': experiment_vector_recall((50, 200, 800)),
         'policy': experiment_policy(),
         'exposure': experiment_exposure(24, (0, 8, 12), 'fix the failing test in the parser'),
         'recovery': experiment_recovery(24, 8, 'fix the failing test in the parser', 'vector_search'),

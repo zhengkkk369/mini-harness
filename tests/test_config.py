@@ -24,6 +24,8 @@ def isolated_env(monkeypatch):
         "MINI_HARNESS_VERIFY_REQUIRED", "MINI_HARNESS_VERIFY_NUDGES",
         "MINI_HARNESS_DENY_TOOLS", "MINI_HARNESS_DENY_PATTERNS",
         "MINI_HARNESS_RECALL", "MINI_HARNESS_RECALL_LIMIT", "MINI_HARNESS_RECALL_SNIPPET",
+        "MINI_HARNESS_RECALL_BACKEND", "MINI_HARNESS_EMBED_MODEL", "MINI_HARNESS_EMBED_BASE_URL",
+        "MINI_HARNESS_EMBED_API_KEY", "MINI_HARNESS_EMBED_BATCH", "MINI_HARNESS_TOOL_BUDGET",
         "MINI_HARNESS_MCP_SERVERS", "MINI_HARNESS_MCP_TIMEOUT", "MINI_HARNESS_MCP_RISKY",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -180,6 +182,8 @@ def test_a_garbage_boolean_is_rejected(monkeypatch):
     ("MINI_HARNESS_VERIFY_NUDGES", "verify_nudges"),
     ("MINI_HARNESS_RECALL_LIMIT", "recall_limit"),
     ("MINI_HARNESS_RECALL_SNIPPET", "recall_snippet"),
+    ("MINI_HARNESS_TOOL_BUDGET", "tool_budget"),
+    ("MINI_HARNESS_EMBED_BATCH", "embed_batch"),
 ])
 def test_count_switches_are_read_from_the_environment(monkeypatch, variable, field):
     monkeypatch.setenv(variable, "3")
@@ -189,11 +193,46 @@ def test_count_switches_are_read_from_the_environment(monkeypatch, variable, fie
 @pytest.mark.parametrize("variable", [
     "MINI_HARNESS_MAX_PARALLEL_TOOLS", "MINI_HARNESS_VERIFY_NUDGES",
     "MINI_HARNESS_RECALL_LIMIT", "MINI_HARNESS_RECALL_SNIPPET",
+    "MINI_HARNESS_TOOL_BUDGET", "MINI_HARNESS_EMBED_BATCH",
 ])
 def test_non_positive_counts_are_rejected(monkeypatch, variable):
     monkeypatch.setenv(variable, "0")
     with pytest.raises(ValueError, match="must be positive"):
         build_config()
+
+
+# --------------------------------------------------------------------------- recall backend
+
+
+def test_the_recall_backend_defaults_to_lexical():
+    cfg = build_config()
+    assert cfg.recall_backend == "lexical"
+    assert cfg.embed_model == "text-embedding-3-small"
+
+
+@pytest.mark.parametrize("backend", ["lexical", "hash", "vector", "hybrid"])
+def test_each_documented_backend_is_accepted(monkeypatch, backend):
+    monkeypatch.setenv("MINI_HARNESS_RECALL_BACKEND", backend)
+    assert build_config().recall_backend == backend
+
+
+def test_an_unknown_backend_is_rejected_at_startup(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_RECALL_BACKEND", "magic")
+
+    with pytest.raises(ValueError, match="MINI_HARNESS_RECALL_BACKEND"):
+        build_config()
+
+
+def test_the_embedding_endpoint_is_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("MINI_HARNESS_EMBED_MODEL", "embed-small")
+    monkeypatch.setenv("MINI_HARNESS_EMBED_BASE_URL", "https://embed.test/v1")
+    monkeypatch.setenv("MINI_HARNESS_EMBED_API_KEY", "embed-key")
+
+    cfg = build_config()
+
+    assert cfg.embed_model == "embed-small"
+    assert cfg.embed_base_url == "https://embed.test/v1"
+    assert cfg.embed_api_key == "embed-key"
 
 
 def test_deny_lists_are_split_on_commas(monkeypatch):
@@ -434,6 +473,8 @@ def test_the_bench_profile_pins_the_new_mechanisms():
     assert BENCH_OVERRIDE["verify_required"] is False
     assert BENCH_OVERRIDE["parallel_tools"] is False
     assert BENCH_OVERRIDE["recall_enabled"] is False
+    assert BENCH_OVERRIDE["tool_budget"] == 0
+    assert BENCH_OVERRIDE["mcp_servers"] == ()
 
 
 def test_the_pinned_switches_reach_the_config(monkeypatch):
@@ -444,6 +485,7 @@ def test_the_pinned_switches_reach_the_config(monkeypatch):
     assert cfg.verify_required is False
     assert cfg.parallel_tools is False
     assert cfg.recall_enabled is False
+    assert cfg.tool_budget == 0
     # anything not pinned keeps its default
     assert cfg.track_files is True
     assert cfg.max_turns_main == 300

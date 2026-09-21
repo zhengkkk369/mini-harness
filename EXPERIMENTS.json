@@ -7,46 +7,46 @@
       "latency_ms": 0.0,
       "calls": 6,
       "serial": {
-        "median_ms": 37.01270000601653,
-        "min_ms": 34.18000000237953,
-        "max_ms": 53.8593000092078
+        "median_ms": 64.82579998555593,
+        "min_ms": 51.630200003273785,
+        "max_ms": 161.33210001862608
       },
       "parallel": {
-        "median_ms": 22.85670000128448,
-        "min_ms": 22.612200002186,
-        "max_ms": 29.30299998843111
+        "median_ms": 38.92349998932332,
+        "min_ms": 35.197699995478615,
+        "max_ms": 77.99489999888465
       },
-      "speedup": 1.6193369998265945
+      "speedup": 1.6654668774220611
     },
     {
       "latency_ms": 5.0,
       "calls": 6,
       "serial": {
-        "median_ms": 71.29569999233354,
-        "min_ms": 67.88490001054015,
-        "max_ms": 75.66360000055283
+        "median_ms": 114.03209998388775,
+        "min_ms": 98.47550000995398,
+        "max_ms": 246.7577000206802
       },
       "parallel": {
-        "median_ms": 28.58300000661984,
-        "min_ms": 26.10339999955613,
-        "max_ms": 33.611099992413074
+        "median_ms": 33.01770001417026,
+        "min_ms": 31.411900010425597,
+        "max_ms": 40.54570000153035
       },
-      "speedup": 2.4943392917405944
+      "speedup": 3.4536657591215745
     },
     {
       "latency_ms": 20.0,
       "calls": 6,
       "serial": {
-        "median_ms": 162.95050000189804,
-        "min_ms": 157.63570000126492,
-        "max_ms": 205.35289999679662
+        "median_ms": 186.30889998166822,
+        "min_ms": 176.02419998729602,
+        "max_ms": 265.48709999769926
       },
       "parallel": {
-        "median_ms": 42.6863000029698,
-        "min_ms": 40.92869999294635,
-        "max_ms": 45.857100005378015
+        "median_ms": 47.15929998201318,
+        "min_ms": 45.765799994114786,
+        "max_ms": 62.896399991586804
       },
-      "speedup": 3.817395745017983
+      "speedup": 3.9506290392929384
     }
   ],
   "subagents": [
@@ -54,52 +54,52 @@
       "latency_ms": 20.0,
       "calls": 4,
       "serial": {
-        "median_ms": 82.40239998849574,
-        "min_ms": 81.98619999166112,
-        "max_ms": 82.77319998887833
+        "median_ms": 83.25389999663457,
+        "min_ms": 82.23919998272322,
+        "max_ms": 86.63390000583604
       },
       "parallel": {
-        "median_ms": 24.13449999585282,
-        "min_ms": 23.777599999448285,
-        "max_ms": 24.925600009737536
+        "median_ms": 26.104799995664507,
+        "min_ms": 24.936400004662573,
+        "max_ms": 30.09119999478571
       },
-      "speedup": 3.414299032615362
+      "speedup": 3.189218075237558
     },
     {
       "latency_ms": 100.0,
       "calls": 4,
       "serial": {
-        "median_ms": 402.65659999568015,
-        "min_ms": 402.12749999773223,
-        "max_ms": 432.77600000146776
+        "median_ms": 404.72540000337176,
+        "min_ms": 403.1459999969229,
+        "max_ms": 501.07280001975596
       },
       "parallel": {
-        "median_ms": 104.23939999600407,
-        "min_ms": 103.07620000094175,
-        "max_ms": 105.73879998992197
+        "median_ms": 105.6150000076741,
+        "min_ms": 104.19690000708215,
+        "max_ms": 261.6258999914862
       },
-      "speedup": 3.8628061943095955
+      "speedup": 3.8320825637832123
     }
   ],
   "trace": [
     {
       "trace": "off",
-      "median_ms": 127.90060001134407,
-      "min_ms": 121.16390001028776,
-      "max_ms": 139.4505000062054,
+      "median_ms": 174.34299999149516,
+      "min_ms": 155.00140000949614,
+      "max_ms": 273.58920002006926,
       "bytes": 0
     },
     {
       "trace": "on",
-      "median_ms": 153.1061999994563,
-      "min_ms": 141.94669999415055,
-      "max_ms": 241.6339000046719,
-      "bytes": 11434
+      "median_ms": 168.78969999379478,
+      "min_ms": 149.54809998744167,
+      "max_ms": 192.0754000020679,
+      "bytes": 11471
     },
     {
       "trace": "overhead",
-      "delta_ms": 25.205599988112226,
-      "bytes": 11434
+      "delta_ms": -5.553299997700378,
+      "bytes": 11471
     }
   ],
   "verify": [
@@ -135,7 +135,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 0.6641999934799969
+      "search_ms": 1.5567000082228333
     },
     {
       "distractors": 200,
@@ -143,7 +143,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 1.3686000020243227
+      "search_ms": 2.8466999938245863
     },
     {
       "distractors": 800,
@@ -151,7 +151,60 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 6.083300002501346
+      "search_ms": 9.35790000949055
+    }
+  ],
+  "vector": [
+    {
+      "distractors": 50,
+      "entries": 55,
+      "archive_texts": 56,
+      "archive_provider_calls": 2,
+      "cold_query_ms": 24.03739999863319,
+      "repeat_texts": 0,
+      "repeat_provider_calls": 0,
+      "warm_query_ms": 7.886200008215383,
+      "lexical_ms": 1.4355999883264303,
+      "vector_ms": 5.949199985479936,
+      "hybrid_ms": 6.861000001663342,
+      "queries": 5,
+      "top1_lexical": 5,
+      "top1_vector": 4,
+      "top1_hybrid": 5
+    },
+    {
+      "distractors": 200,
+      "entries": 205,
+      "archive_texts": 206,
+      "archive_provider_calls": 4,
+      "cold_query_ms": 98.38609999860637,
+      "repeat_texts": 0,
+      "repeat_provider_calls": 0,
+      "warm_query_ms": 20.571499975631014,
+      "lexical_ms": 2.8651999891735613,
+      "vector_ms": 23.011399985989556,
+      "hybrid_ms": 24.646799982292578,
+      "queries": 5,
+      "top1_lexical": 5,
+      "top1_vector": 3,
+      "top1_hybrid": 5
+    },
+    {
+      "distractors": 800,
+      "entries": 805,
+      "archive_texts": 806,
+      "archive_provider_calls": 10,
+      "cold_query_ms": 314.07360002049245,
+      "repeat_texts": 0,
+      "repeat_provider_calls": 0,
+      "warm_query_ms": 76.78430000669323,
+      "lexical_ms": 8.909399999538437,
+      "vector_ms": 94.08740000799298,
+      "hybrid_ms": 101.21439999784343,
+      "queries": 5,
+      "top1_lexical": 5,
+      "top1_vector": 2,
+      "top1_hybrid": 5
     }
   ],
   "policy": [

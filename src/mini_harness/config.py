@@ -48,6 +48,12 @@ def env_flag(value: str, name: str) -> bool:
 def env_list(value: str) -> tuple:
     return tuple(part.strip() for part in value.split(',') if part.strip())
 
+# How the recall tool ranks archived messages. 'lexical' is the dependency-free
+# default; 'hash' is a deterministic offline stand-in for the vector path, kept
+# for tests and for checking the plumbing without a provider; 'vector' and
+# 'hybrid' call an embeddings endpoint.
+RECALL_BACKENDS = frozenset({'lexical', 'hash', 'vector', 'hybrid'})
+
 @dataclass(frozen = True)
 class Config:
     # default_factory, not a direct call: a direct call would freeze the
@@ -124,6 +130,16 @@ class Config:
     recall_enabled: bool = True
     recall_limit: int = 5
     recall_snippet: int = 400
+    # How recall ranks archived messages. 'lexical' needs nothing but this
+    # repository; 'hash' is a deterministic offline stand-in for the vector
+    # path; 'vector' and 'hybrid' call an embeddings endpoint, which the
+    # default provider does not serve, so they need embed_base_url pointed at a
+    # provider that does.
+    recall_backend: str = 'lexical'
+    embed_model: str = 'text-embedding-3-small'
+    embed_base_url: str = ''
+    embed_api_key: str = ''
+    embed_batch: int = 96
 
     # MCP servers to bridge tools from, each written as 'name=command line'.
     # Remote tools default to risky, because a server can do anything.
@@ -393,11 +409,21 @@ def build_config() -> Config:
     if trace := os.environ.get('MINI_HARNESS_TRACE'):
         overrides['trace_path'] = trace
     for name in ('max_parallel_tools', 'verify_nudges', 'recall_limit', 'recall_snippet',
-                 'tool_budget'):
+                 'tool_budget', 'embed_batch'):
         if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
             if int(value) <= 0:
                 raise ValueError(f'{name} must be positive')
             overrides[name] = int(value)
+    for env_name, field_name in (('MINI_HARNESS_RECALL_BACKEND', 'recall_backend'),
+                                 ('MINI_HARNESS_EMBED_MODEL', 'embed_model'),
+                                 ('MINI_HARNESS_EMBED_BASE_URL', 'embed_base_url'),
+                                 ('MINI_HARNESS_EMBED_API_KEY', 'embed_api_key')):
+        if value := os.environ.get(env_name):
+            overrides[field_name] = value
+    if backend := overrides.get('recall_backend'):
+        if backend not in RECALL_BACKENDS:
+            raise ValueError(f'MINI_HARNESS_RECALL_BACKEND must be one of {sorted(RECALL_BACKENDS)}, '
+                             f'got {backend!r}')
     for variable, name in (('MINI_HARNESS_PARALLEL_TOOLS', 'parallel_tools'),
                            ('MINI_HARNESS_READ_ONLY', 'read_only'),
                            ('MINI_HARNESS_VERIFY_REQUIRED', 'verify_required'),

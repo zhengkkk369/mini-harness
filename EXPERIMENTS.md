@@ -2,7 +2,8 @@
 
 Measurements of the mini-harness mechanisms added in this repository: parallel
 tool execution, subagent concurrency, the event trace, retrievable memory, the
-verification loop, the dispatch policy, and the tool-exposure budget.
+pluggable vector backend, the verification loop, the dispatch policy, and the
+tool-exposure budget.
 
 ## What these numbers are, and what they are not
 
@@ -140,9 +141,9 @@ hit counts only when the planted text comes back.
 
 | Distractors | Archived messages | Top-1 | Top-3 | Search (median) |
 | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 5/5 | 5/5 | 0.51 ms |
-| 200 | 205 | 5/5 | 5/5 | 1.16 ms |
-| 800 | 805 | 5/5 | 5/5 | 3.87 ms |
+| 50 | 55 | 5/5 | 5/5 | 2.04 ms |
+| 200 | 205 | 5/5 | 5/5 | 8.81 ms |
+| 800 | 805 | 5/5 | 5/5 | 13.16 ms |
 
 Reading this:
 
@@ -150,14 +151,57 @@ Reading this:
   present. The distractors share vocabulary with the queries (the filler includes
   words like `deploy`, `retry` and `config`), so this is not a trivial separator.
 - Search cost grows linearly with the archive, because the scorer scans every
-  entry. At 805 entries that is under 4 ms, which is nothing next to a model
-  call; at hundreds of thousands of entries it would need an inverted index.
-  This is the main scaling limit of the current implementation.
+  entry. At 805 entries that is 13 ms, which is nothing next to a model call; at
+  hundreds of thousands of entries it would need an inverted index. This is the
+  main scaling limit of the current implementation.
 - Five facts per size is a small sample. It demonstrates that the ranking works,
   not how well it generalises to real conversation text, where queries are
   messier and the useful answer may share no rare token with them.
+- These numbers are higher than the first recorded run because the filler is now
+  unique per line. It used to repeat every 15 lines, so the "800 distractor" row
+  was really a 15-document archive scanned 805 times.
 
-## 5. Verification loop
+## 5. Vector retrieval
+
+The same archives, searched through the pluggable backend with the offline
+`hash` stand-in, at the embedder's batch size of 96. Cost first:
+
+| Distractors | Archived | Texts embedded | Provider calls | Cold query (ms) | Repeat texts | Repeat calls | Warm query (ms) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 55 | 56 | 2 | 38.97 | 0 | 0 | 13.09 |
+| 200 | 205 | 206 | 4 | 99.43 | 0 | 0 | 21.67 |
+| 800 | 805 | 806 | 10 | 326.22 | 0 | 0 | 78.43 |
+
+Then quality and steady-state cost, with the archive already embedded:
+
+| Distractors | Lexical (ms) | Vector (ms) | Hybrid (ms) | Top-1 lexical | Top-1 vector | Top-1 hybrid |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 1.57 | 7.22 | 7.62 | 5/5 | 4/5 | 5/5 |
+| 200 | 2.83 | 21.93 | 23.27 | 5/5 | 3/5 | 5/5 |
+| 800 | 8.21 | 79.32 | 96.18 | 5/5 | 2/5 | 5/5 |
+
+Reading this, including the parts that do not flatter the change:
+
+- **The cache is what makes it affordable.** The first vector query embeds the
+  whole archive -- 806 texts, 10 provider round trips at a batch of 96. Every
+  later query embeds only its own text, and repeating a query embeds nothing at
+  all. Vectors are unit-normalised on the way into the cache, so a comparison is
+  a dot product rather than two square roots per candidate.
+- **The offline stand-in ranks worse than lexical, and the table says so.** It
+  hashes tokens into slots, so it sees the same word-overlap signal the lexical
+  scorer already uses, with less precision: top-1 falls from 5/5 to 2/5 as the
+  archive grows. That is a statement about the stand-in, not about embeddings.
+  **No number here supports "vector retrieval is better"** -- that needs a real
+  embeddings model, and the default provider for this harness serves no
+  `/embeddings` route at all.
+- **Hybrid is the safe combination.** Fusing the two rankings by reciprocal rank
+  holds 5/5 at every size here, because the lexical head keeps its place, while
+  the vector half can still surface an entry lexical scoring missed.
+- **The vector scan is pure Python**, so it costs roughly 6-10x a lexical scan at
+  the same size. A real deployment would put both behind a vector index rather
+  than scanning a list.
+
+## 7. Verification loop
 
 A scripted agent that reads a file, edits it, and then stops. `verify_required`
 is on by default; the nudge is bounded by `verify_nudges` (1 here).
@@ -187,7 +231,7 @@ not that it was a good one. A model could satisfy it with `echo`. That is a real
 limitation of a mechanical check, and it is why the result is reported as a
 `verified` flag rather than being treated as proof.
 
-## 6. Dispatch policy
+## 8. Dispatch policy
 
 Policy decisions for a representative set of calls, with
 `policy_deny_tools=('run_sandbox',)` and `policy_deny_patterns=('rm -rf*',)`.
@@ -207,7 +251,7 @@ before approval, so a denied call never reaches the human at all — asserted in
 In `read_only` mode the same rules deny `write_file`, `edit_file`, `run_bash`,
 `run_sandbox` and `run_subagent` while leaving reads alone.
 
-## 7. Tool exposure
+## 9. Tool exposure
 
 The built-in tools plus a synthetic bridged surface of 24 tools, serialised the
 way the request carries them. Budget `0` means "expose everything".
@@ -227,7 +271,7 @@ A budget of 8 costs a third of the schema payload. Characters are reported
 rather than tokens so the arithmetic stays checkable; `chars / 4` is the usual
 rough estimate and is labelled as such.
 
-## 8. Hidden tool recovery
+## 10. Hidden tool recovery
 
 Hiding a tool is only safe if the model can get it back. The experiment hides
 `vector_search` behind the budget above, then asks `find_tools` for it in its own
@@ -273,6 +317,11 @@ executed. Both paths are covered in `tests/test_selector.py`.
   `chars / 4` estimate, not a tokenizer count, and the bridged surface is
   synthetic filler rather than a real server. The recovery path is real: it runs
   the shipped `find_tools` and selection code.
+- **Vector retrieval quality is not measured here.** The only embedder this suite
+  can run offline hashes tokens, so it is a weaker lexical scorer, not a semantic
+  one. The measured part is the plumbing: batching, the cache, normalisation, the
+  cosine scan and the fallback. A real embeddings endpoint is needed to say
+  anything about quality, and the harness's default provider does not offer one.
 
 ## Files
 
@@ -282,5 +331,6 @@ executed. Both paths are covered in `tests/test_selector.py`.
 | `EXPERIMENTS.json` | raw results of the recorded run |
 | `tests/test_parallel.py` | overlap is proved with a barrier, not a stopwatch |
 | `tests/test_policy.py` | policy decisions and dispatch attribution |
+| `tests/test_embed.py` | the embedders, the fusion, the cache and the fallback |
 | `tests/test_selector.py` | the exposure budget, `find_tools`, and the hidden-call refusal |
 | `tests/test_trace.py` | trace format, flushing and failure handling |

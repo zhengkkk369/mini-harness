@@ -20,6 +20,7 @@ from enum import Enum
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.embed import build_embedder
 from mini_harness.memory import Memory, journal_path
 from mini_harness.policy import Policy, DENY
 from mini_harness.selector import SELECTION, rank_definitions
@@ -608,17 +609,29 @@ def recall(inp: RecallInput, cfg = CONFIG) -> str:
     start = time.time()
     memory = Memory(journal_path(cfg))
     stats = memory.stats()
-    hits = memory.search(inp.query, inp.limit, inp.role)
+    backend = cfg.recall_backend
+    embedder = build_embedder(cfg)
+    note = ''
+    try:
+        hits = memory.search(inp.query, inp.limit, inp.role, embedder = embedder, mode = backend)
+    except Exception as e:
+        # A provider failure must not cost the run its memory: fall back to the
+        # ranking that needs nothing, and say so rather than silently switching.
+        note = (f'[recall]: {backend} search failed ({type(e).__name__}: {e}); '
+                f'fell back to lexical ranking\n')
+        backend, hits = 'lexical-fallback', memory.search(inp.query, inp.limit, inp.role)
     TRACE.emit('recall', query = inp.query, hits = len(hits), entries = stats['entries'],
-               seconds = round(time.time() - start, 4))
+               backend = backend, seconds = round(time.time() - start, 4),
+               **(embedder.describe() if embedder is not None else {}))
 
     if not stats['entries']:
         return '[recall]: nothing has been compacted yet, the whole conversation is still in context'
     if not hits:
-        return (f'[recall]: no match for {inp.query!r} among {stats["entries"]} archived messages. '
+        return (note + f'[recall]: no match for {inp.query!r} among {stats["entries"]} archived messages. '
                 'Try fewer or different words.')
 
-    lines = [f'[recall]: {len(hits)} of {stats["entries"]} archived messages match {inp.query!r}']
+    lines = [note + f'[recall]: {len(hits)} of {stats["entries"]} archived messages match {inp.query!r}'
+             f' ({backend})']
     for hit in hits:
         text = ' '.join(hit.text.split())
         if len(text) > cfg.recall_snippet:
