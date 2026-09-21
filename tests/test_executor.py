@@ -234,6 +234,28 @@ def test_edit_is_allowed_when_only_the_mtime_changed(cfg, workspace):
     assert (workspace / "sandbox" / "f.py").read_text(encoding="utf-8") == "b\n"
 
 
+def test_an_external_change_under_the_same_mtime_is_still_stale(cfg, workspace):
+    """Content decides, not the clock.
+
+    A writer can land inside the filesystem's timestamp resolution, so two
+    versions of a file can share an mtime. Trusting that timestamp let an edit
+    through against content the model had never seen -- which is what the Windows
+    CI job caught, and why this case is pinned deterministically here.
+    """
+    import os
+
+    target = write(workspace / "sandbox" / "f.py", "alpha 0123456789\n")
+    runner = make_executor(cfg)
+    runner.execute_tool(call("read_file", file_path="sandbox/f.py"), cfg=cfg)
+    stamp = target.stat().st_mtime
+    write(target, "alpha rewritten by something else\n")
+    os.utime(target, (stamp, stamp))
+
+    result = runner.execute_tool(call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="b"), cfg=cfg)
+
+    assert result.tag == TAG.STALE
+
+
 def test_edit_of_a_missing_file_bypasses_the_read_gate(cfg):
     result = make_executor(cfg).execute_tool(
         call("edit_file", file_path="sandbox/ghost.py", old_string="a", new_string="b"), cfg=cfg

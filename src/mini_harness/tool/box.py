@@ -197,16 +197,22 @@ class ToolExecution:
         return
 
     def _fresh(self, key: str) -> bool:
+        """Whether the file still holds what the recorded read saw.
+
+        The digest decides, and it decides even when the modification time looks
+        unchanged: a writer can land inside the filesystem's timestamp resolution,
+        so two different versions of a file can share an mtime. Trusting that
+        timestamp let an edit through against content the model had never read --
+        the whole point of the gate -- and the Windows CI job is what caught it.
+        The mtime stays on the record for diagnosis; it is not the answer.
+        """
         with self._lock:
             rec = self.files.get(key)
         if rec is None:
             return False
 
-        p = Path(key)
         try:
-            if p.stat().st_mtime == rec.mtime:
-                return True
-            return _digest(p) == rec.digest
+            return _digest(Path(key)) == rec.digest
         except OSError:
             return False
 

@@ -299,7 +299,11 @@ def test_a_plain_no_proxy_is_left_alone(monkeypatch):
 
 
 def test_a_missing_no_proxy_is_not_an_error(monkeypatch):
+    # Both spellings: the CI runner sets the lowercase one, and the function
+    # reads either, so a test about "nothing configured" has to clear both.
     monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+
     assert normalize_no_proxy() is None
 
 
