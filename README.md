@@ -17,12 +17,13 @@
 - **Small, but complete.** About 3,100 lines of Python across 20 modules: eleven
   tools, context compaction, request retries, streaming responses, and session
   memory.
-- **Tested offline.** `uv run pytest` runs 587 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 591 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the tools, context compaction, retrievable memory, tool exposure,
   embedding backends, MCP bridging, configuration, the sandbox command builder,
-  the benchmark's own tasks, and the TUI's worker protocol. A further 13 checks
-  drive a real Docker engine when one is running.
+  the benchmark's own tasks, the recorded experiment numbers, and the TUI's
+  worker protocol. A further 13 checks drive a real Docker engine when one is
+  running.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
   The definition contract is enforced in code, not just written in the prompt,
@@ -513,6 +514,7 @@ uv run --locked pytest tests/test_sandbox_live.py   # the live sandbox checks, i
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
 | `tests/test_history.py` | repairing a stored conversation so the API accepts it |
 | `tests/test_mini_bench.py` | that every benchmark task starts unsolved, that a reference fix passes, and that a weakened test suite is refused |
+| `tests/test_experiments_doc.py` | that every number in EXPERIMENTS.md is the number EXPERIMENTS.json recorded |
 | `tests/test_tui.py` | the TUI worker protocol, driven as a real subprocess in demo mode |
 
 For measurements rather than pass/fail, see [EXPERIMENTS.md](EXPERIMENTS.md) and
