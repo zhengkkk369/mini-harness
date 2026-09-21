@@ -198,7 +198,8 @@ Three readings, and the second one is the point:
   — nothing in the prompt says what the expected values are — but not harder for
   this model, which finds `test_*.py`, runs it, and fixes the code. The ceiling is
   a property of small tasks and a capable model, not of task wording.
-- **The nudge never fired: 0 times in 30 runs with `verify_required` on.** Its
+- **The nudge never fired: 0 times in any of this tier's 30 runs, 15 of which had
+  `verify_required` on** (the other 15 are the `no_verify` half, where it is off). Its
   precondition is "the run is about to stop with unverified edits", and a model
   that runs the shipped suite after editing never satisfies it. Adding tasks
   cannot show the mechanism's benefit; on this evidence the only way to observe
@@ -279,9 +280,9 @@ Counting every run this repository has recorded:
 
 | runs | `verify_required` | shell available | nudges |
 | ---: | --- | --- | ---: |
-| 45 | on | yes | **0** |
+| 81 | on | yes | **0** |
 | 8 | on | no (denied by policy) | 8 — one per run |
-| 69 | off | yes | n/a |
+| 57 | off | yes | n/a |
 
 The nudge fires on the precondition "the run is about to stop with an edit it
 never ran anything after". This model does not stop that way when it can run
@@ -517,9 +518,10 @@ task instead of 500.
 
 ## Limitations
 
-- **Ceiling effect.** The mini suite is sixteen small tasks, and the model solved
-  71 of 72 runs of the first twelve, 30 of 30 runs of the harder tier, and 12 of
-  12 of the task written to punish an unverified first attempt. It cannot rank
+- **Ceiling effect.** The mini suite is eighteen tasks, and the model solved
+  71 of 72 runs of the first twelve, 30 of 30 runs of the harder tier, 12 of
+  12 of the task written to punish an unverified first attempt, and 12 of 12 of
+  the long-horizon tier on each of two models. It cannot rank
   configurations. Its value is that it exercises the harness end to end against a
   real model and produces token, turn and trace data — and that its one failure
   was informative.
@@ -534,7 +536,9 @@ task instead of 500.
   these, and they are the task author's defect.
 - **The verification loop's benefit is unmeasured.** It fires only when a run
   stops unverified, which this model does not do on a task whose specification
-  it can run — 0 nudges in 30 harder-tier runs with the mechanism on. What is
+  it can run — zero nudge firings in every recorded run that had the mechanism on
+  and a shell to use (the table in "What would be needed to show the loop's
+  benefit" counts them). What is
   measured is that it fires when it must, that it is bounded, and that it does
   not lie.
 - **The TUI run is one prompt**, driven through a test pilot rather than a real

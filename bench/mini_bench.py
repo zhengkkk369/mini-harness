@@ -903,6 +903,57 @@ def summary_row(summary: dict) -> str:
             f"${summary['total_cost']:.4f} |")
 
 
+# The census table's rows, in the order MODEL_EVAL.md presents them: which
+# mechanisms could engage in a run of that configuration.
+CENSUS_ORDER = ((True, True), (True, False), (False, True), (False, False))
+
+
+def exposure(config: str) -> tuple:
+    """``(verify_required, shell available)`` for a configuration.
+
+    Read off the configuration's own overrides rather than restated, so a
+    configuration that starts denying the shell cannot leave the census table
+    describing the previous set.
+    """
+    overrides = CONFIGS.get(config)
+    if overrides is None:
+        raise ValueError(f'unknown configuration {config!r}')
+    denied = tuple(overrides.get('policy_deny_tools', ()))
+    return (bool(overrides.get('verify_required', True)),
+            not ('run_bash' in denied or 'run_sandbox' in denied))
+
+
+def census_rows(paths) -> list:
+    """MODEL_EVAL.md's "every run this repository has recorded" table.
+
+    The document claimed to count every recorded run while its numbers described
+    an earlier repository: two more tiers were recorded and the table still read
+    45/8/69 against 146. It is derived from the artifacts here for the same
+    reason the per-configuration summaries are.
+    """
+    groups = {}
+    for path in paths:
+        rows = json.loads(Path(path).read_text(encoding='utf-8'))
+        for row in rows:
+            bucket = groups.setdefault(exposure(row['config']), {'runs': 0, 'nudges': 0})
+            bucket['runs'] += 1
+            bucket['nudges'] += row.get('nudges', 0) or 0
+    return [_census_row(key, groups[key]) for key in CENSUS_ORDER if key in groups]
+
+
+def _census_row(key: tuple, bucket: dict) -> str:
+    verify, shell = key
+    runs, nudges = bucket['runs'], bucket['nudges']
+    if not verify:
+        shown = 'n/a'
+    elif nudges and nudges == runs:
+        shown = f'{nudges} — one per run'
+    else:
+        shown = f'**{nudges}**'
+    return (f"| {runs} | {'on' if verify else 'off'} | "
+            f"{'yes' if shell else 'no (denied by policy)'} | {shown} |")
+
+
 def apply_overrides(configs: dict, model: str = None, sub_model: str = None,
                     prices: dict = None) -> dict:
     """Fold the command line's overrides into every configuration.

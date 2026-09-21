@@ -4,7 +4,10 @@ The recorded runs live in MINI_BENCH*.json and the document summarises them, whi
 is exactly the arrangement that drifted in EXPERIMENTS.md. Writing this found four
 errors in the document: a "median tokens" column that held totals, two tables
 whose median-turns columns had been swapped by hand, and a median taken over an
-even number of rows and rounded to a whole turn.
+even number of rows and rounded to a whole turn. It later found a fifth, of the
+other shape: the table that counts every recorded run still described an earlier
+repository (45/8/69 against 146), because no per-configuration check could see a
+claim that spans the artifacts.
 
 `bench/mini_bench.aggregate` owns the definition of a summary, so the checker
 cannot disagree with the runner about what a column means.
@@ -82,6 +85,26 @@ def test_the_document_says_how_many_tasks_the_suite_has(document):
     from bench import mini_bench
 
     assert f'{len(mini_bench.TASKS)} tasks' in document
+
+
+def test_the_census_table_counts_every_recorded_run(document):
+    """The cross-artifact table is the one no per-configuration check covers.
+
+    It claims to count every run in the repository, and it was wrong: two more
+    tiers were recorded and it still read 45/8/69 against 146. Deriving it from
+    every artifact is what keeps the claim true.
+    """
+    from bench.mini_bench import census_rows
+
+    paths = sorted(ROOT.glob('MINI_BENCH*.json'))
+    assert paths, 'no recorded runs to count'
+    rows = census_rows(paths)
+    missing = [row for row in rows if row not in document]
+
+    assert not missing, 'MODEL_EVAL.md does not carry:\n' + '\n'.join(missing)
+    counted = sum(int(row.split('|')[1]) for row in rows)
+    recorded = sum(len(read(path.name)) for path in paths)
+    assert counted == recorded, f'the census counts {counted} of {recorded} runs'
 
 
 def test_the_document_does_not_claim_a_lift_the_runs_did_not_show(document):
