@@ -9,6 +9,11 @@ in the prose.
 
 `bench/sync_experiments_doc.py` holds the row formats and can rewrite them, so
 checking and fixing cannot disagree about what a row should look like.
+
+The same thing then happened to the *paragraphs*: the rows were re-recorded and
+the sentences next to them kept quoting the previous run. So the sentences that
+quote a timed number are generated from the artifact as well, and the test below
+requires them verbatim.
 """
 
 import json
@@ -22,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from bench.sync_experiments_doc import expected_rows, render_rows  # noqa: E402
+from bench.sync_experiments_doc import expected_rows, missing_prose, render_prose, render_rows  # noqa: E402
 
 ARTIFACT = ROOT / 'EXPERIMENTS.json'
 DOC = ROOT / 'EXPERIMENTS.md'
@@ -72,4 +77,55 @@ def test_every_recorded_table_has_a_header_in_the_document(recorded, document):
     for table, rows in render_rows(recorded).items():
         if rows:
             assert any(_key(spelling) in styled for spelling in HEADERS[table]), table
+
+
+def test_the_document_carries_every_generated_sentence(recorded, document):
+    """Prose that quotes a timed number has to be the current recording.
+
+    This is the half that drifted: the table was updated and the sentence above
+    it was not, so the document contradicted itself in adjacent lines.
+    """
+    missing = missing_prose(recorded, document)
+
+    assert not missing, ('EXPERIMENTS.md does not carry these sentences from the artifact:\n'
+                         + '\n'.join(missing))
+
+
+def test_the_document_does_not_quote_the_rows_it_generates():
+    """A restated number is the drift path; the source is read instead."""
+    from bench.sync_experiments_doc import _overheads
+
+    recorded = json.loads(ARTIFACT.read_text(encoding='utf-8'))
+    document = DOC.read_text(encoding='utf-8')
+    rows = _overheads(recorded)
+    stale = []
+    for row in rows.values():
+        for number in (f"{row['delta_ms']:+.2f} ms", f"{row['min_delta_ms']:+.2f} ms",
+                       f"{row['max_delta_ms']:+.2f} ms"):
+            for line in document.splitlines():
+                if line.strip().startswith('| ') or number not in line:
+                    continue
+                stale.append((number, line.strip()))
+    generated = {line.strip() for line in render_prose(recorded)}
+    stale = [(number, line) for number, line in stale if line not in generated]
+
+    assert not stale, 'these sentences restate a generated timing:\n' + '\n'.join(
+        f'{number}: {line}' for number, line in stale)
+
+
+def test_sync_rewrites_a_sentence_that_quotes_an_old_run(tmp_path):
+    """The fixer has to repair prose, not only rows."""
+    from bench.sync_experiments_doc import sync
+
+    recorded = json.loads(ARTIFACT.read_text(encoding='utf-8'))
+    document = DOC.read_text(encoding='utf-8')
+    stale = render_prose(recorded)[1].replace('+74.62 ms', '+999.99 ms')
+    doctored = tmp_path / 'EXPERIMENTS.md'
+    doctored.write_text(document.replace(render_prose(recorded)[1], stale), encoding='utf-8')
+
+    changed, unplaced = sync(doc=doctored, artifact=ARTIFACT)
+
+    assert render_prose(recorded)[1] in doctored.read_text(encoding='utf-8')
+    assert changed >= 1
+    assert not [item for item in unplaced if item[0] == 'prose']
 

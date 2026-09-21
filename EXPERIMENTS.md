@@ -117,17 +117,20 @@ median, because timing one block and then the other measures the machine:
 | 20 | 84 | **+25.94 ms** | -25.62 ms | +68.70 ms | 308.9 us |
 | 200 | 804 | **+74.62 ms** | -298.47 ms | +452.75 ms | 92.8 us |
 
-Reading it:
+Reading it (these two sentences are generated from the artifact, like the tables):
 
-- **Only the longer run is outside the noise.** 84 events gives +20.06 ms with
-  pairs spanning -102 to +200 ms, so that row is not a measurement; 804 events
-  gives +58.63 ms, or about **0.07 ms per event**.
-- **The per-event figure moves between runs, and the doc says so.** Recorded
-  runs of this same experiment put the 804-event row at +58.63 ms (0.07), +82.25
-  ms (0.10), +174.02 ms (0.22) and +208.47 ms (0.26); individual pairs have
-  reached +1004 ms. Timing a process that is writing to disk is noisy, and one
-  slow pair can carry the median. The honest form is **"of order 0.1 ms per
-  event"**, not a precise constant -- twice the sample has twice moved it.
+The 84-event row is not a measurement on this machine: **+25.94 ms** over pairs spanning -25.62 to +68.70 ms.
+
+Tracing the 804-event run costs **+74.62 ms** over pairs spanning -298.47 to +452.75 ms, about **0.09 ms per event**.
+
+- **The per-event figure moves between runs, and the doc says so.** Earlier
+  recordings of this same experiment put the 804-event row at +58.63 ms (0.07),
+  +82.25 ms (0.10), +174.02 ms (0.22) and +208.47 ms (0.26); individual pairs
+  have reached +1004 ms. Timing a process that is writing to disk is noisy, and
+  one slow pair can carry the median. The honest form is **"of order 0.1 ms per
+  event"**, not a precise constant -- the sample has moved it on every
+  re-recording. The numbers in this list are history: they are deliberately kept
+  as recorded, and the current recording is the generated line above.
 - **Conclusion for a real run.** Tracing a 10,000-event session costs on the
   order of a second of wall clock. Model latency is 10-90 s per request, so this
   is not a reason to leave the trace off -- but it is also not free, and the
@@ -389,10 +392,10 @@ executed. Both paths are covered in `tests/test_selector.py`.
   numbers stay contiguous (they are assigned under a lock) and result order
   always matches the order the model asked for, but the trace file is not
   byte-stable between runs.
-- **The trace cost is measured per event, with a wide spread.** The paired
-  median at 804 events is +82 ms with 15 pairs, but individual pairs ranged from
-  -433 ms to +277 ms, and the 84-event run is entirely inside that spread.
-  Recorded runs put the per-event cost between 0.03 and 0.26 ms. Treat it as
+- **The trace cost is measured per event, with a wide spread.** The generated
+  line in section 3 carries the paired median and its spread; individual pairs
+  there straddle zero, and the shorter run sits entirely inside them. Recorded
+  runs put the per-event cost between 0.03 and 0.31 ms. Treat it as
   "of order 0.1 ms per event", not a constant.
 - **The compaction experiment measures the machinery, not the summary.** Its
   summariser is a stub at both extremes -- one returns the removed text verbatim,

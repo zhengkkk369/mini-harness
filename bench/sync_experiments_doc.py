@@ -9,6 +9,13 @@ the expected rows (the test imports `expected_rows`) and rewrites them in place:
 
 One source for the document's row formats, used by the checker and the fixer, so
 a format change cannot make one of them wrong about the other.
+
+The tables were checked from the start; the paragraphs around them were not, and
+they drifted -- a re-recorded run left the prose describing the previous one
+while the table above it described the current one. So the sentences that quote
+a timed number are generated here too (`render_prose`). Prose that is not
+generated is for history and conclusions and must not restate the current
+recording's numbers; `sync` rewrites the generated lines in place.
 """
 
 import json
@@ -130,6 +137,52 @@ def expected_rows(results) -> list:
     tables = render_rows(results)
     return [row for table in TABLES for row in tables[table]]
 
+def _overheads(results) -> dict:
+    """{turns: overhead row} for the trace runs that were paired."""
+    rows = [row for row in results.get('trace', []) if 'per_event_us' in row]
+    return {row['turns']: row for row in rows}
+
+def _per_event_ms(row) -> float:
+    return row['per_event_us'] / 1000
+
+def prose_leads(results) -> list:
+    """The stable start of each generated sentence, so `sync` can find its line.
+
+    Only the lead is fixed: everything after it is rewritten from the artifact,
+    which is what makes a re-recorded run visible as a diff instead of invisible.
+    """
+    rows = _overheads(results)
+    short, long_ = rows[min(rows)], rows[max(rows)]
+    return [
+        f"The {short['events']}-event row is not a measurement on this machine:",
+        f"Tracing the {long_['events']}-event run costs",
+    ]
+
+def render_prose(results) -> list:
+    """The sentences in the document that quote a timed number.
+
+    Each is one physical line so the checker can require it verbatim and the
+    fixer can replace it by its lead. The trace section quotes the same numbers
+    the table above it carries, which is exactly the pair that drifted.
+    """
+    rows = _overheads(results)
+    short, long_ = rows[min(rows)], rows[max(rows)]
+    short_lead, long_lead = prose_leads(results)
+    return [
+        f"{short_lead} "
+        f"**{short['delta_ms']:+.2f} ms** over pairs spanning "
+        f"{short['min_delta_ms']:+.2f} to {short['max_delta_ms']:+.2f} ms.",
+        f"{long_lead} "
+        f"**{long_['delta_ms']:+.2f} ms** over pairs spanning "
+        f"{long_['min_delta_ms']:+.2f} to {long_['max_delta_ms']:+.2f} ms, about "
+        f"**{_per_event_ms(long_):.2f} ms per event**.",
+    ]
+
+def missing_prose(results, document: str) -> list:
+    """Generated sentences the document does not carry verbatim."""
+    lines = {' '.join(line.split()) for line in document.splitlines()}
+    return [line for line in render_prose(results) if ' '.join(line.split()) not in lines]
+
 def sync(doc: Path = DOC, artifact: Path = ARTIFACT) -> tuple:
     """Rewrite the document's data rows from the artifact. Returns (changed, unplaced)."""
     results = json.loads(Path(artifact).read_text(encoding='utf-8'))
@@ -156,12 +209,29 @@ def sync(doc: Path = DOC, artifact: Path = ARTIFACT) -> tuple:
             lines[index] = pending[table].popleft()
         else:
             unplaced.append((table, line))
+    lines, prose_changed, prose_missing = _sync_prose(lines, results)
+    changed += prose_changed
+    unplaced += [('prose', lead) for lead in prose_missing]
     Path(doc).write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return changed, unplaced
 
+def _sync_prose(lines: list, results) -> tuple:
+    """Rewrite each generated sentence on the line its lead starts."""
+    generated = dict(zip(prose_leads(results), render_prose(results)))
+    changed = 0
+    for lead, sentence in generated.items():
+        for index, line in enumerate(lines):
+            if line.strip().startswith(lead):
+                if line != sentence:
+                    changed += 1
+                lines[index] = sentence
+                break
+    missing = missing_prose(results, '\n'.join(lines))
+    return lines, changed, missing
+
 def main() -> int:
     changed, unplaced = sync()
-    print(f'rewrote {changed} row(s)')
+    print(f'rewrote {changed} row(s) and generated sentence(s)')
     for table, line in unplaced:
         print(f'  unplaced [{table}]: {line}')
     return 0
