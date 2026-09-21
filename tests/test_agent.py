@@ -649,7 +649,8 @@ def test_the_nudge_asks_for_a_run(cfg_factory, workspace):
     assert len(nudges) == 1
 
 
-def test_a_run_after_an_edit_counts_as_verification(cfg_factory, workspace):
+def test_a_run_that_touches_the_change_counts_as_verification(cfg_factory, workspace):
+    """Running the changed file is what "verified" is supposed to mean."""
     cfg = cfg_factory(verify_required=True)
     write(workspace / "sandbox" / "f.py", "alpha\n")
     seen = []
@@ -658,7 +659,8 @@ def test_a_run_after_an_edit_counts_as_verification(cfg_factory, workspace):
         Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
         Stream(completion(model_message("", [
             call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
-        Stream(completion(model_message("", [call("run_bash", command="echo ok")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("run_bash", command="python sandbox/f.py")]), 10, 5)),
         Stream(completion(model_message("verified"), 10, 5)),
     )
 
@@ -667,8 +669,86 @@ def test_a_run_after_an_edit_counts_as_verification(cfg_factory, workspace):
     assert result.turns == 4
     assert result.mutations == 1
     assert result.verified is True
-    assert seen == ["echo ok"]
+    assert result.verification == "targeted"
+    assert result.unverified_files == ()
+    assert seen == ["python sandbox/f.py"]
     assert len(client.stream_calls) == 4
+
+
+def test_a_run_that_touches_nothing_does_not_count(cfg_factory, workspace, capsys):
+    """The rule this replaced: any command satisfied it, so `echo` did."""
+    cfg = cfg_factory(verify_required=True, verify_nudges=1)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("", [call("run_bash", command="echo ok")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+        Stream(completion(model_message("done again"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg, execu=stub_shell_executor(cfg))
+
+    assert result.outcome == OUTCOME.COMPLETED
+    assert result.verified is False
+    assert result.verification == "unrelated"
+    assert result.unverified_files == ("sandbox/f.py",)
+    nudges = [m for m in agent.message
+              if m["role"] == "user" and "have not run anything since" in m["content"]]
+    assert len(nudges) == 1
+    assert "sandbox/f.py" in nudges[0]["content"], "the nudge should name the file"
+
+
+def test_a_run_that_fails_does_not_verify_anything(cfg_factory, workspace):
+    """A failed command is not a check that passed."""
+    cfg = cfg_factory(verify_required=True, verify_nudges=1)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("run_bash", command="python sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+        Stream(completion(model_message("done again"), 10, 5)),
+    )
+
+    def failing_shell(args, cfg=None):
+        raise RuntimeError('the command exited 1')
+
+    from mini_harness.tool.box import ToolDefinition
+    registry = dict(REGISTRY)
+    registry['run_bash'] = ToolDefinition('run_bash', 'failing shell', box.RunBashInput,
+                                          failing_shell, True)
+    execution = box.ToolExecution(registry, box._always_allow, cfg=cfg)
+
+    result = send(agent, client, cfg, execu=execution)
+
+    assert result.verified is False
+    assert result.failed_by_tag.get('execute_failed:RuntimeError') == 1
+    assert result.unverified_files == ("sandbox/f.py",)
+
+
+def test_the_strict_rule_can_be_turned_off(cfg_factory, workspace):
+    """For reproducing runs recorded under the old rule."""
+    cfg = cfg_factory(verify_required=True, verify_targets_changed=False)
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    agent, client = make_agent(
+        cfg,
+        Stream(completion(model_message("", [call("read_file", file_path="sandbox/f.py")]), 10, 5)),
+        Stream(completion(model_message("", [
+            call("edit_file", file_path="sandbox/f.py", old_string="alpha", new_string="beta")]), 10, 5)),
+        Stream(completion(model_message("", [call("run_bash", command="echo ok")]), 10, 5)),
+        Stream(completion(model_message("done"), 10, 5)),
+    )
+
+    result = send(agent, client, cfg, execu=stub_shell_executor(cfg))
+
+    assert result.verified is True
+    assert result.turns == 4
 
 
 def test_verification_can_be_switched_off(cfg_factory, workspace):

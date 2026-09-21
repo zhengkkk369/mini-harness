@@ -48,9 +48,9 @@ not instant (a network fetch, a subprocess, a large file). Six calls with
 
 | Injected latency | Calls | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: | ---: |
-| 0 ms | 6 | 45.96 ms | 27.57 ms | 1.67x |
-| 5 ms | 6 | 82.17 ms | 30.15 ms | 2.73x |
-| 20 ms | 6 | 172.62 ms | 46.49 ms | 3.71x |
+| 0 ms | 6 | 41.80 ms | 29.82 ms | 1.40x |
+| 5 ms | 6 | 75.50 ms | 28.05 ms | 2.69x |
+| 20 ms | 6 | 166.73 ms | 44.65 ms | 3.73x |
 
 Reading this:
 
@@ -82,8 +82,8 @@ models.
 
 | Injected latency | Calls | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: | ---: |
-| 20 ms | 4 | 82.57 ms | 25.39 ms | 3.25x |
-| 100 ms | 4 | 403.05 ms | 104.58 ms | 3.85x |
+| 20 ms | 4 | 82.47 ms | 24.75 ms | 3.33x |
+| 100 ms | 4 | 402.83 ms | 105.56 ms | 3.82x |
 
 This is close to the ideal 4x, and closer than the read batch gets, because the
 stubbed subagent releases the GIL for the whole of its latency while a file read
@@ -103,10 +103,10 @@ The same scripted run with the trace off and on, at two lengths: 20 tool turns
 
 | Trace | Turns | Events | Median | Min | Max | Bytes written |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| off | 20 | 0 | 144.14 ms | 137.32 ms | 342.40 ms | 0 |
-| on | 20 | 84 | 163.97 ms | 147.52 ms | 362.70 ms | 11,543 |
-| off | 200 | 0 | 2070.13 ms | 1696.96 ms | 3103.29 ms | 0 |
-| on | 200 | 804 | 2106.72 ms | 1777.89 ms | 2883.31 ms | 108,797 |
+| off | 20 | 0 | 130.58 ms | 120.75 ms | 166.82 ms | 0 |
+| on | 20 | 84 | 162.39 ms | 134.26 ms | 196.20 ms | 11,588 |
+| off | 200 | 0 | 1599.89 ms | 1488.83 ms | 1850.67 ms | 0 |
+| on | 200 | 804 | 1704.48 ms | 1487.83 ms | 1982.77 ms | 108,791 |
 
 Those medians are not the measurement. The two conditions are timed
 **alternately inside each repeat** and the paired difference is what gets a
@@ -114,8 +114,8 @@ median, because timing one block and then the other measures the machine:
 
 | Turns | Events | Overhead (paired median) | Min pair | Max pair | Per event |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20 | 84 | **+20.06 ms** | -102.42 ms | +199.69 ms | 238.9 us |
-| 200 | 804 | **+58.63 ms** | -412.66 ms | +412.32 ms | 72.9 us |
+| 20 | 84 | **+25.94 ms** | -25.62 ms | +68.70 ms | 308.9 us |
+| 200 | 804 | **+74.62 ms** | -298.47 ms | +452.75 ms | 92.8 us |
 
 Reading it:
 
@@ -166,9 +166,9 @@ hit counts only when the planted text comes back.
 
 | Distractors | Archived messages | Top-1 | Top-3 | Search (median) |
 | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 5/5 | 5/5 | 2.36 ms |
-| 200 | 205 | 5/5 | 5/5 | 5.09 ms |
-| 800 | 805 | 5/5 | 5/5 | 9.03 ms |
+| 50 | 55 | 5/5 | 5/5 | 1.28 ms |
+| 200 | 205 | 5/5 | 5/5 | 2.20 ms |
+| 800 | 805 | 5/5 | 5/5 | 6.92 ms |
 
 Reading this:
 
@@ -197,12 +197,12 @@ between them, and that gap is the part this experiment cannot measure.
 
 | Turns | Summariser | Messages before | After | Removed | Facts in context | Archived | Recall top-1 | Recall top-3 | Compact (ms) |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 6 | verbatim | 55 | 10 | 45 | 6/6 | 5 | 5/5 | 5/5 | 14.85 |
-| 6 | losing | 55 | 10 | 45 | 1/6 | 5 | 5/5 | 5/5 | 11.04 |
-| 12 | verbatim | 103 | 10 | 93 | 6/6 | 6 | 6/6 | 6/6 | 7.09 |
-| 12 | losing | 103 | 10 | 93 | 0/6 | 6 | 6/6 | 6/6 | 10.52 |
-| 30 | verbatim | 247 | 10 | 237 | 6/6 | 6 | 6/6 | 6/6 | 7.05 |
-| 30 | losing | 247 | 10 | 237 | 0/6 | 6 | 6/6 | 6/6 | 14.64 |
+| 6 | verbatim | 55 | 10 | 45 | 6/6 | 5 | 5/5 | 5/5 | 5.76 |
+| 6 | losing | 55 | 10 | 45 | 1/6 | 5 | 5/5 | 5/5 | 7.07 |
+| 12 | verbatim | 103 | 10 | 93 | 6/6 | 6 | 6/6 | 6/6 | 6.02 |
+| 12 | losing | 103 | 10 | 93 | 0/6 | 6 | 6/6 | 6/6 | 7.06 |
+| 30 | verbatim | 247 | 10 | 237 | 6/6 | 6 | 6/6 | 6/6 | 6.71 |
+| 30 | losing | 247 | 10 | 237 | 0/6 | 6 | 6/6 | 6/6 | 6.21 |
 
 Reading it:
 
@@ -243,17 +243,17 @@ The same archives, searched through the pluggable backend with the offline
 
 | Distractors | Archived | Texts embedded | Provider calls | Cold query (ms) | Repeat texts | Repeat calls | Warm query (ms) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 56 | 2 | 22.45 | 0 | 0 | 5.83 |
-| 200 | 205 | 206 | 4 | 103.54 | 0 | 0 | 20.76 |
-| 800 | 805 | 806 | 10 | 321.31 | 0 | 0 | 135.05 |
+| 50 | 55 | 56 | 2 | 21.99 | 0 | 0 | 4.27 |
+| 200 | 205 | 206 | 4 | 152.29 | 0 | 0 | 16.08 |
+| 800 | 805 | 806 | 10 | 232.82 | 0 | 0 | 65.96 |
 
 Then quality and steady-state cost, with the archive already embedded:
 
 | Distractors | Lexical (ms) | Vector (ms) | Hybrid (ms) | Top-1 lexical | Top-1 vector | Top-1 hybrid |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50 | 1.77 | 6.44 | 9.00 | 5/5 | 4/5 | 5/5 |
-| 200 | 2.72 | 20.26 | 25.81 | 5/5 | 3/5 | 5/5 |
-| 800 | 10.06 | 99.48 | 116.37 | 5/5 | 2/5 | 5/5 |
+| 50 | 1.90 | 6.32 | 5.26 | 5/5 | 4/5 | 5/5 |
+| 200 | 2.53 | 16.34 | 21.40 | 5/5 | 3/5 | 5/5 |
+| 800 | 8.36 | 65.64 | 88.93 | 5/5 | 2/5 | 5/5 |
 
 Reading this, including the parts that do not flatter the change:
 
@@ -280,13 +280,16 @@ Reading this, including the parts that do not flatter the change:
 ## 7. Verification loop
 
 A scripted agent that reads a file, edits it, and then stops. `verify_required`
-is on by default; the nudge is bounded by `verify_nudges` (1 here).
+is on by default; the nudge is bounded by `verify_nudges` (1 here). The criterion
+is "a run touched what changed, or ran the suite": the verdict column says which
+of those it was, and `none` means the run never ran anything at all.
 
-| Scenario | Turns | Mutations | Nudges | `verified` | Outcome |
-| --- | ---: | ---: | ---: | --- | --- |
-| off, edit then answer | 3 | 1 | 0 | False | completed |
-| on, edit then answer | 4 | 1 | 1 | False | completed |
-| on, edit then run then answer | 4 | 1 | 0 | True | completed |
+| scenario | turns | mutations | verified | verdict | nudges | outcome |
+| --- | ---: | ---: | --- | --- | ---: | --- |
+| off, edit then answer | 3 | 1 | False | none | 0 | completed |
+| on, edit then answer | 4 | 1 | False | none | 1 | completed |
+| on, edit then run the changed file | 4 | 1 | True | targeted | 0 | completed |
+| on, edit then run something unrelated | 5 | 1 | False | unrelated | 1 | completed |
 
 Reading this:
 
@@ -294,18 +297,24 @@ Reading this:
   False. The flag reports the truth whether or not the mechanism is enforcing it.
 - With verification on, stopping unverified costs exactly one extra turn (3 to
   4) and one nudge.
-- The nudge is bounded. In the second scenario the scripted agent ignores it,
-  and the run still terminates after one nudge rather than looping; `verified`
-  stays False.
-- When the agent runs something after editing, no nudge is needed and `verified`
-  is True — the mechanism distinguishes "ran something since the last edit" from
-  "did not", and costs nothing in the good case.
+- **Running the file that changed is accepted and costs nothing** (4 turns, no
+  nudge, `verified` True). So does running the suite: `pytest`, `unittest`, `tox`,
+  `cargo test` and a short list of others count on their own, because the most
+  thorough check there is need not name the file.
+- **Running something else is not accepted.** `echo verified` leaves the file
+  unverified, so the run is nudged once and reports False — one turn more than
+  the run that checked, which is the cost of the stricter rule. The nudge names
+  the file it is asking about.
+- The nudge is bounded. In the second and fourth scenarios the scripted agent
+  ignores it, and the run still terminates after one nudge rather than looping.
 
-What this does **not** measure is whether running something actually proves the
-change works. The mechanism checks that a verification-shaped action happened,
-not that it was a good one. A model could satisfy it with `echo`. That is a real
-limitation of a mechanical check, and it is why the result is reported as a
-`verified` flag rather than being treated as proof.
+What this does **not** measure is whether running something proves the change
+works. "Touched the file" is a heuristic: `cat f.py` also satisfies it, and a
+test that passes for an unrelated reason satisfies it too. It is strictly
+stronger than the rule it replaced — which any command satisfied, including
+`echo` — but it is still a mechanical check, which is why the result is reported
+as a verdict (`none` / `unrelated` / `targeted` / `suite`) alongside `verified`
+rather than being treated as proof.
 
 ## 8. Dispatch policy
 
@@ -334,9 +343,9 @@ way the request carries them. Budget `0` means "expose everything".
 
 | Bridged tools | Budget | Exposed | Hidden | Schema chars | Est. tokens | vs no budget |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 24 | 0 | 35 | 0 | 17,869 | 4,467 | 1.00x |
-| 24 | 8 | 8 | 27 | 5,834 | 1,458 | 0.33x |
-| 24 | 12 | 12 | 23 | 8,977 | 2,244 | 0.50x |
+| 24 | 0 | 36 | 0 | 18,557 | 4,639 | 1.00x |
+| 24 | 8 | 8 | 28 | 6,149 | 1,537 | 0.33x |
+| 24 | 12 | 12 | 24 | 8,803 | 2,201 | 0.47x |
 
 The task behind these rows is `fix the failing test in the parser`. The four
 always-exposed tools are `find_tools`, `read_file`, `grep_file` and `glob_file`;

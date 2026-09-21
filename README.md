@@ -258,11 +258,18 @@ reports whether it did. Measured cost and behaviour are in
 ```sh
 export MINI_HARNESS_VERIFY_REQUIRED=false  # do not spend the extra turn
 export MINI_HARNESS_VERIFY_NUDGES=2        # how many times to ask
+export MINI_HARNESS_VERIFY_TARGETS=false   # accept any command, as before
 ```
 
-`verified` means a shell command succeeded after the last edit. It does not prove
-the command tested the change, and it is reported as a flag rather than treated
-as proof.
+`verified` means a successful run **touched what changed** — it named one of the
+edited files, its file name, or its stem — or invoked a test runner, because
+running the suite is the most thorough check there is and need not name the file.
+`Result.verification` says which it was (`none`, `unrelated`, `targeted`, `suite`)
+and `Result.unverified_files` lists what is still unaccounted for. This is a
+heuristic, not a proof: `cat f.py` satisfies it too. It is strictly stronger than
+"any command ran", which `echo ok` satisfied. Set
+`MINI_HARNESS_VERIFY_TARGETS=false` to reproduce a run recorded under that older
+rule.
 
 ## Retrievable memory
 

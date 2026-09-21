@@ -7,46 +7,46 @@
       "latency_ms": 0.0,
       "calls": 6,
       "serial": {
-        "median_ms": 45.95530001097359,
-        "min_ms": 41.39150000992231,
-        "max_ms": 67.88489999598823
+        "median_ms": 41.80340000311844,
+        "min_ms": 37.98949997872114,
+        "max_ms": 246.304100000998
       },
       "parallel": {
-        "median_ms": 27.569400001084432,
-        "min_ms": 24.032499990426004,
-        "max_ms": 34.769599995343015
+        "median_ms": 29.820900002960116,
+        "min_ms": 25.07740000146441,
+        "max_ms": 163.439500000095
       },
-      "speedup": 1.666895181221425
+      "speedup": 1.4018155051983308
     },
     {
       "latency_ms": 5.0,
       "calls": 6,
       "serial": {
-        "median_ms": 82.17129998956807,
-        "min_ms": 74.56209999509156,
-        "max_ms": 196.06190000195056
+        "median_ms": 75.50010000704788,
+        "min_ms": 69.11240000044927,
+        "max_ms": 80.59709999361075
       },
       "parallel": {
-        "median_ms": 30.148599995300174,
-        "min_ms": 26.79460000945255,
-        "max_ms": 62.58840000373311
+        "median_ms": 28.048700012732297,
+        "min_ms": 25.44659998966381,
+        "max_ms": 30.822500004433095
       },
-      "speedup": 2.725542811353683
+      "speedup": 2.691750418834945
     },
     {
       "latency_ms": 20.0,
       "calls": 6,
       "serial": {
-        "median_ms": 172.61550002149306,
-        "min_ms": 164.4191000086721,
-        "max_ms": 305.358299985528
+        "median_ms": 166.73210001317784,
+        "min_ms": 162.20270001213066,
+        "max_ms": 250.69519999669865
       },
       "parallel": {
-        "median_ms": 46.48670001188293,
-        "min_ms": 42.798399983439595,
-        "max_ms": 50.56229999172501
+        "median_ms": 44.65429999982007,
+        "min_ms": 41.300300013972446,
+        "max_ms": 48.46329998690635
       },
-      "speedup": 3.7132233515687085
+      "speedup": 3.7338419819334234
     }
   ],
   "subagents": [
@@ -54,31 +54,31 @@
       "latency_ms": 20.0,
       "calls": 4,
       "serial": {
-        "median_ms": 82.57090000552125,
-        "min_ms": 81.91410001018085,
-        "max_ms": 85.23829997284338
+        "median_ms": 82.46509998571128,
+        "min_ms": 81.8237999919802,
+        "max_ms": 84.35029999236576
       },
       "parallel": {
-        "median_ms": 25.385099987033755,
-        "min_ms": 23.986499989405274,
-        "max_ms": 154.06040000380017
+        "median_ms": 24.751099990680814,
+        "min_ms": 23.872299992945045,
+        "max_ms": 95.6010999798309
       },
-      "speedup": 3.252730934591432
+      "speedup": 3.3317751541046947
     },
     {
       "latency_ms": 100.0,
       "calls": 4,
       "serial": {
-        "median_ms": 403.0489999859128,
-        "min_ms": 402.10590002243407,
-        "max_ms": 443.383800011361
+        "median_ms": 402.8272999858018,
+        "min_ms": 401.77789999870583,
+        "max_ms": 483.2194999908097
       },
       "parallel": {
-        "median_ms": 104.58179999841377,
-        "min_ms": 103.32510000444017,
-        "max_ms": 233.6621999857016
+        "median_ms": 105.56140000699088,
+        "min_ms": 103.33270000410266,
+        "max_ms": 152.29130000807345
       },
-      "speedup": 3.8539114835662227
+      "speedup": 3.816047342675678
     }
   ],
   "trace": [
@@ -86,59 +86,59 @@
       "trace": "off",
       "turns": 20,
       "events": 0,
-      "median_ms": 144.14280001074076,
-      "min_ms": 137.3201000096742,
-      "max_ms": 342.3966999980621,
+      "median_ms": 130.58060000184923,
+      "min_ms": 120.74540002504364,
+      "max_ms": 166.81759999482892,
       "bytes": 0
     },
     {
       "trace": "on",
       "turns": 20,
       "events": 84,
-      "median_ms": 163.9701999956742,
-      "min_ms": 147.5198999978602,
-      "max_ms": 362.69629999878816,
-      "bytes": 11543
+      "median_ms": 162.3886000015773,
+      "min_ms": 134.2634999891743,
+      "max_ms": 196.20190002024174,
+      "bytes": 11588
     },
     {
       "trace": "overhead",
       "turns": 20,
       "events": 84,
-      "bytes": 11543,
-      "delta_ms": 20.064599986653775,
-      "min_delta_ms": -102.42380001000129,
-      "max_delta_ms": 199.68629998038523,
+      "bytes": 11588,
+      "delta_ms": 25.94429996679537,
+      "min_delta_ms": -25.61989997047931,
+      "max_delta_ms": 68.69580002967268,
       "pairs": 15,
-      "per_event_us": 238.8642855554021
+      "per_event_us": 308.8607138904211
     },
     {
       "trace": "off",
       "turns": 200,
       "events": 0,
-      "median_ms": 2070.128899998963,
-      "min_ms": 1696.9559999997728,
-      "max_ms": 3103.288000012981,
+      "median_ms": 1599.8932000075001,
+      "min_ms": 1488.8258000137284,
+      "max_ms": 1850.6740000157151,
       "bytes": 0
     },
     {
       "trace": "on",
       "turns": 200,
       "events": 804,
-      "median_ms": 2106.7164999840315,
-      "min_ms": 1777.8865000000224,
-      "max_ms": 2883.30610000412,
-      "bytes": 108797
+      "median_ms": 1704.4821000017691,
+      "min_ms": 1487.8319000126794,
+      "max_ms": 1982.771800016053,
+      "bytes": 108791
     },
     {
       "trace": "overhead",
       "turns": 200,
       "events": 804,
-      "bytes": 108797,
-      "delta_ms": 58.62829997204244,
-      "min_delta_ms": -412.66210001776926,
-      "max_delta_ms": 412.317999987863,
+      "bytes": 108791,
+      "delta_ms": 74.62440000381321,
+      "min_delta_ms": -298.47400001017377,
+      "max_delta_ms": 452.7523000142537,
       "pairs": 15,
-      "per_event_us": 72.92077110950552
+      "per_event_us": 92.81641791519056
     }
   ],
   "verify": [
@@ -147,6 +147,7 @@
       "turns": 3,
       "mutations": 1,
       "verified": false,
+      "verification": "none",
       "nudges": 0,
       "outcome": "completed"
     },
@@ -155,15 +156,26 @@
       "turns": 4,
       "mutations": 1,
       "verified": false,
+      "verification": "none",
       "nudges": 1,
       "outcome": "completed"
     },
     {
-      "scenario": "on, edit then run then answer",
+      "scenario": "on, edit then run the changed file",
       "turns": 4,
       "mutations": 1,
       "verified": true,
+      "verification": "targeted",
       "nudges": 0,
+      "outcome": "completed"
+    },
+    {
+      "scenario": "on, edit then run something unrelated",
+      "turns": 5,
+      "mutations": 1,
+      "verified": false,
+      "verification": "unrelated",
+      "nudges": 1,
       "outcome": "completed"
     }
   ],
@@ -174,7 +186,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 2.3557999811600894
+      "search_ms": 1.2839999981224537
     },
     {
       "distractors": 200,
@@ -182,7 +194,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 5.088300007628277
+      "search_ms": 2.198100002715364
     },
     {
       "distractors": 800,
@@ -190,7 +202,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 9.028300002682954
+      "search_ms": 6.92350001190789
     }
   ],
   "compaction": [
@@ -206,8 +218,8 @@
       "recall_top1": 5,
       "recall_top3": 5,
       "asked": 5,
-      "search_ms": 1.4551000203937292,
-      "compact_ms": 14.847399987047538,
+      "search_ms": 0.742000003810972,
+      "compact_ms": 5.764000001363456,
       "summary_calls": 1
     },
     {
@@ -222,8 +234,8 @@
       "recall_top1": 5,
       "recall_top3": 5,
       "asked": 5,
-      "search_ms": 1.2635000166483223,
-      "compact_ms": 11.042499972973019,
+      "search_ms": 1.0957999911624938,
+      "compact_ms": 7.068799983244389,
       "summary_calls": 1
     },
     {
@@ -238,8 +250,8 @@
       "recall_top1": 6,
       "recall_top3": 6,
       "asked": 6,
-      "search_ms": 1.8310500017832965,
-      "compact_ms": 7.0899999991524965,
+      "search_ms": 1.601200012373738,
+      "compact_ms": 6.015199993271381,
       "summary_calls": 1
     },
     {
@@ -254,8 +266,8 @@
       "recall_top1": 6,
       "recall_top3": 6,
       "asked": 6,
-      "search_ms": 4.366850000224076,
-      "compact_ms": 10.515100002521649,
+      "search_ms": 1.545200007967651,
+      "compact_ms": 7.064200006425381,
       "summary_calls": 1
     },
     {
@@ -270,8 +282,8 @@
       "recall_top1": 6,
       "recall_top3": 6,
       "asked": 6,
-      "search_ms": 3.5692499950528145,
-      "compact_ms": 7.047199993394315,
+      "search_ms": 2.970599991385825,
+      "compact_ms": 6.707599997753277,
       "summary_calls": 1
     },
     {
@@ -286,8 +298,8 @@
       "recall_top1": 6,
       "recall_top3": 6,
       "asked": 6,
-      "search_ms": 3.620549992774613,
-      "compact_ms": 14.63670001248829,
+      "search_ms": 3.1689000024925917,
+      "compact_ms": 6.211400002939627,
       "summary_calls": 1
     }
   ],
@@ -314,13 +326,13 @@
       "entries": 55,
       "archive_texts": 56,
       "archive_provider_calls": 2,
-      "cold_query_ms": 22.451299999374896,
+      "cold_query_ms": 21.987699990859255,
       "repeat_texts": 0,
       "repeat_provider_calls": 0,
-      "warm_query_ms": 5.826699984027073,
-      "lexical_ms": 1.7682999896351248,
-      "vector_ms": 6.43609999679029,
-      "hybrid_ms": 8.996099990326911,
+      "warm_query_ms": 4.273300000932068,
+      "lexical_ms": 1.8965000053867698,
+      "vector_ms": 6.317899998975918,
+      "hybrid_ms": 5.260700010694563,
       "queries": 5,
       "top1_lexical": 5,
       "top1_vector": 4,
@@ -331,13 +343,13 @@
       "entries": 205,
       "archive_texts": 206,
       "archive_provider_calls": 4,
-      "cold_query_ms": 103.5445999877993,
+      "cold_query_ms": 152.28889998979867,
       "repeat_texts": 0,
       "repeat_provider_calls": 0,
-      "warm_query_ms": 20.76329998089932,
-      "lexical_ms": 2.716499991947785,
-      "vector_ms": 20.260399993276224,
-      "hybrid_ms": 25.81089999875985,
+      "warm_query_ms": 16.0844000056386,
+      "lexical_ms": 2.531200007069856,
+      "vector_ms": 16.34370000101626,
+      "hybrid_ms": 21.402200014563277,
       "queries": 5,
       "top1_lexical": 5,
       "top1_vector": 3,
@@ -348,13 +360,13 @@
       "entries": 805,
       "archive_texts": 806,
       "archive_provider_calls": 10,
-      "cold_query_ms": 321.3134999969043,
+      "cold_query_ms": 232.81889999634586,
       "repeat_texts": 0,
       "repeat_provider_calls": 0,
-      "warm_query_ms": 135.0547000183724,
-      "lexical_ms": 10.064400004921481,
-      "vector_ms": 99.47759998613037,
-      "hybrid_ms": 116.36660000658594,
+      "warm_query_ms": 65.95770001877099,
+      "lexical_ms": 8.362900000065565,
+      "vector_ms": 65.63820000155829,
+      "hybrid_ms": 88.93289999105036,
       "queries": 5,
       "top1_lexical": 5,
       "top1_vector": 2,
@@ -387,29 +399,29 @@
     {
       "budget": 0,
       "external": 24,
-      "exposed": 35,
+      "exposed": 36,
       "hidden": 0,
-      "schema_chars": 17869,
-      "est_tokens": 4467,
+      "schema_chars": 18557,
+      "est_tokens": 4639,
       "vs_no_budget": 1.0
     },
     {
       "budget": 8,
       "external": 24,
       "exposed": 8,
-      "hidden": 27,
-      "schema_chars": 5834,
-      "est_tokens": 1458,
-      "vs_no_budget": 0.3265
+      "hidden": 28,
+      "schema_chars": 6149,
+      "est_tokens": 1537,
+      "vs_no_budget": 0.3314
     },
     {
       "budget": 12,
       "external": 24,
       "exposed": 12,
-      "hidden": 23,
-      "schema_chars": 8977,
-      "est_tokens": 2244,
-      "vs_no_budget": 0.5024
+      "hidden": 24,
+      "schema_chars": 8803,
+      "est_tokens": 2201,
+      "vs_no_budget": 0.4744
     }
   ],
   "recovery": [
@@ -424,20 +436,20 @@
         "grep_file",
         "read_file",
         "find_tools",
+        "skills",
         "edit_file",
         "run_sandbox",
-        "browser_open",
-        "run_bash"
+        "browser_open"
       ],
       "exposed_after": [
         "glob_file",
         "grep_file",
         "read_file",
         "find_tools",
+        "skills",
         "vector_search",
         "edit_file",
-        "run_sandbox",
-        "browser_open"
+        "run_sandbox"
       ],
       "hidden_before": true,
       "recovered": true

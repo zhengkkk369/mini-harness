@@ -126,6 +126,8 @@ O2. run_subagent is available (explore_agent, coding_agent, planning_agent). Use
 # one would otherwise add turns or reorder work:
 #
 #   verify_required  an unverified edit would cost an extra turn
+#   verify_targets   the stricter "the run touched what changed" verdict would
+#                    change which runs report verified
 #   parallel_tools   read batches would overlap instead of running in order
 #   recall_enabled   the run would carry an eleventh tool and an extra prompt line
 #   tool_budget      a non-zero cap would hide tools and shorten the prompt
@@ -148,6 +150,7 @@ BENCH_OVERRIDE: dict = {
     'deny_dir': frozenset(),
     'bash_env_deny': ('DEEPSEEK_API_KEY',),
     'verify_required': False,
+    'verify_targets_changed': False,
     'parallel_tools': False,
     'recall_enabled': False,
     'tool_budget': 0,

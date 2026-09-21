@@ -120,9 +120,12 @@ class Config:
     read_only: bool = False
 
     # Verification. When required, finishing with unverified edits costs one
-    # extra turn asking the agent to run something first.
+    # extra turn asking the agent to run something first. `verify_targets_changed`
+    # makes "verified" mean the run touched the files that changed, rather than
+    # merely that something ran.
     verify_required: bool = True
     verify_nudges: int = 1
+    verify_targets_changed: bool = True
 
     # Tool exposure. Zero sends every tool on every request; a positive budget
     # ranks the tools against the task and keeps the best of them, with the
@@ -442,6 +445,7 @@ def build_config() -> Config:
     for variable, name in (('MINI_HARNESS_PARALLEL_TOOLS', 'parallel_tools'),
                            ('MINI_HARNESS_READ_ONLY', 'read_only'),
                            ('MINI_HARNESS_VERIFY_REQUIRED', 'verify_required'),
+                           ('MINI_HARNESS_VERIFY_TARGETS', 'verify_targets_changed'),
                            ('MINI_HARNESS_RECALL', 'recall_enabled'),
                            ('MINI_HARNESS_QUIET_TOOLS', 'quiet_tools'),
                            ('MINI_HARNESS_SKILLS', 'skills_enabled'),

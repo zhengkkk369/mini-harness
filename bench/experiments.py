@@ -241,8 +241,11 @@ def experiment_verify(repeats):
     seed()
     edit = call('edit_file', file_path='sandbox/f.py', old_string='value = 0', new_string='value = 1')
     read = call('read_file', file_path='sandbox/f.py')
-    # a shell tool that always succeeds: what matters is that a run happened
-    run = call('run_bash', command='echo verified')
+    # Two kinds of "I ran something": one touches the file that changed, one does
+    # not. The mechanism is supposed to tell them apart, and this is where that
+    # is measured rather than asserted.
+    targeted = call('run_bash', command='python sandbox/f.py')
+    unrelated = call('run_bash', command='echo verified')
 
     scenarios = {
         'off, edit then answer': (dict(verify_required=False),
@@ -254,11 +257,17 @@ def experiment_verify(repeats):
                                   completion(message('', [edit])),
                                   completion(message('done')),
                                   completion(message('done again'))]),
-        'on, edit then run then answer': (dict(verify_required=True),
-                                          [completion(message('', [read])),
-                                           completion(message('', [edit])),
-                                           completion(message('', [run])),
-                                           completion(message('done'))]),
+        'on, edit then run the changed file': (dict(verify_required=True),
+                                               [completion(message('', [read])),
+                                                completion(message('', [edit])),
+                                                completion(message('', [targeted])),
+                                                completion(message('done'))]),
+        'on, edit then run something unrelated': (dict(verify_required=True),
+                                                  [completion(message('', [read])),
+                                                   completion(message('', [edit])),
+                                                   completion(message('', [unrelated])),
+                                                   completion(message('done')),
+                                                   completion(message('done again'))]),
     }
     rows = []
     for label, (overrides, script) in scenarios.items():
@@ -271,6 +280,7 @@ def experiment_verify(repeats):
                 'turns': result.turns,
                 'mutations': result.mutations,
                 'verified': result.verified,
+                'verification': result.verification,
                 'nudges': sum(1 for m in agent.message
                               if m.get('role') == 'user'
                               and 'have not run anything since' in str(m.get('content'))),
@@ -816,11 +826,13 @@ def render(results):
                          f"{row['min_delta_ms']:+.2f} | {row['max_delta_ms']:+.2f} | "
                          f"{row['per_event_us']:.1f} |")
     lines += ['', '## Verification loop', '',
-              '| scenario | turns | mutations | nudges | verified | outcome |',
-              '| --- | ---: | ---: | ---: | --- | --- |']
+              'The verification criterion is "a run touched what changed, or ran the suite".',
+              '', '| scenario | turns | mutations | verified | verdict | nudges | outcome |',
+              '| --- | ---: | ---: | --- | --- | ---: | --- |']
     for row in results['verify']:
         lines.append(f"| {row['scenario']} | {row['turns']} | {row['mutations']} | "
-                     f"{row['nudges']} | {row['verified']} | {row['outcome']} |")
+                     f"{row['verified']} | {row['verification']} | "
+                     f"{row['nudges']} | {row['outcome']} |")
     lines += ['', '## Retrievable memory', '',
               'Planted facts searched for among deterministic distractors.',
               '', '| distractors | archived | top-1 | top-3 | search (median) |',

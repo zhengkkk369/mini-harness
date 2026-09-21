@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import time
 
 from openai import OpenAI, LengthFinishReasonError
@@ -11,7 +12,7 @@ from mini_harness.budget import ACCOUNT, Budget, STOP_WALL, cached_tokens, SOURC
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
-from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, log_tool, WRITE_TOOLS
+from mini_harness.tool.box import _ask_human, _always_allow, _edited_path, ToolExecution, _to_api_tool, log_tool, WRITE_TOOLS
 from mini_harness.history import atomic_write
 from mini_harness.selector import SELECTION, select
 from mini_harness.skills import load as load_skills
@@ -31,6 +32,66 @@ VERIFY_NUDGE = (
     'tests that cover your change and show the result. If you cannot verify it, say plainly what '
     'remains unverified.'
 )
+# Commands that check a project rather than a file. Running the suite is the most
+# thorough verification there is, and it need not name the file that changed, so
+# it counts on its own. The list is a heuristic and deliberately short.
+VERIFY_RUNNERS = ('pytest', 'unittest', 'tox', 'nox', 'make test', 'npm test', 'npm run test',
+                  'cargo test', 'go test', 'gradle test', 'mvn test')
+
+def normalise_path(text) -> str:
+    return str(text).replace('\\', '/').strip().lower()
+
+def _command_of(tool_call) -> str:
+    """The shell command a verification call ran, when it has one."""
+    try:
+        arguments = json.loads(tool_call.function.arguments or '{}')
+    except (TypeError, ValueError):
+        return ''
+    command = arguments.get('command') if isinstance(arguments, dict) else None
+    return command if isinstance(command, str) else ''
+
+def verification_touches(command: str, output: str, changed) -> str:
+    """What one verification run had to do with the files that changed.
+
+    ``targeted`` when the command or its output names a changed file, its file
+    name, or its stem (so ``python test_parse.py`` counts for ``parse.py``).
+    ``suite`` when it invokes a test runner, which covers everything by
+    definition. ``unrelated`` otherwise -- running *something* is not the same as
+    running something that could fail because of the change.
+
+    This is a heuristic, not a proof: ``cat f.py`` also "touches" the file. It is
+    strictly stronger than the rule it replaces, which any command satisfied.
+    """
+    haystack = normalise_path(f'{command}\n{output}')
+    for path in changed or ():
+        full = normalise_path(path)
+        name = full.rsplit('/', 1)[-1]
+        stem = name.rsplit('.', 1)[0]
+        if full and full in haystack:
+            return 'targeted'
+        if name and name in haystack:
+            return 'targeted'
+        # A stem has to be long enough to be a word, and has to start one, so
+        # "f" does not match half the output and "test_parse" still matches.
+        if len(stem) >= 4 and re.search(rf'(?<![a-z0-9]){re.escape(stem)}', haystack):
+            return 'targeted'
+    if any(runner in haystack for runner in VERIFY_RUNNERS):
+        return 'suite'
+    return 'unrelated'
+
+def verify_nudge(changed) -> str:
+    """The nudge, naming the files when the run knows them."""
+    files = sorted({normalise_path(path) for path in changed or () if normalise_path(path)})
+    if not files:
+        return VERIFY_NUDGE
+    shown = ', '.join(files[:4])
+    if len(files) > 4:
+        shown += f' (and {len(files) - 4} more)'
+    return (
+        f'You changed {shown} but have not run anything since. Before finishing, run the code or '
+        f'the tests that cover the change and show the result. If you cannot verify it, say '
+        f'plainly what remains unverified.'
+    )
 
 @dataclass(frozen = True)
 class Result:
@@ -51,6 +112,10 @@ class Result:
     mutations: int = 0
     model_calls: int = 0
     usage_by_source: dict = field(default_factory = dict)
+    # What the last verification had to do with the change, and what is still
+    # unaccounted for. `verified` is the summary of these two.
+    verification: str = 'none'
+    unverified_files: tuple = ()
 
 
 class DeepSeekAgent:
@@ -218,7 +283,9 @@ class DeepSeekAgent:
         turns = calls = ok = last_prompt = 0
         err = ''
         stopped_by = ''
-        mutated = unverified = nudges = 0
+        mutated = unverified = nudges = unrelated = 0
+        verification = 'none'
+        changed = set()
         verified = True
         by_tag = {}
         by_tool = {}
@@ -315,8 +382,20 @@ class DeepSeekAgent:
                                 if used in WRITE_TOOLS:
                                     mutated += 1
                                     unverified += 1
+                                    target = _edited_path(tool_call)
+                                    if target:
+                                        changed.add(target)
                                 elif used in VERIFY_TOOLS:
-                                    unverified = 0
+                                    verdict = verification_touches(
+                                        _command_of(tool_call), content, changed)
+                                    if verdict == 'unrelated' and cfg.verify_targets_changed:
+                                        # Something ran, but nothing that could
+                                        # fail because of the change.
+                                        unrelated += 1
+                                    else:
+                                        unverified = 0
+                                        changed.clear()
+                                    verification = verdict
                                 if used == 'run_todo':
                                     print(f'\n-=-=-=-=-= Todo List -=-=-=-=-=\n{res.content}')
                             else:
@@ -335,10 +414,13 @@ class DeepSeekAgent:
                         # happen, at the cost of one bounded extra turn.
                         nudges += 1
                         self.message.append(message.model_dump(exclude_none=True))
-                        self.message.append({'role': 'user', 'content': VERIFY_NUDGE})
-                        print(f'\n[verify]: {unverified} edit(s) with no run since, asking the agent to verify')
+                        self.message.append({'role': 'user', 'content': verify_nudge(changed)})
+                        print(f'\n[verify]: {unverified} edit(s) since the last covering run, '
+                              f'asking the agent to verify')
                         TRACE.emit('verify_nudge', unverified = unverified, nudge = nudges,
-                                   mutations = mutated, turn = turns)
+                                   mutations = mutated, turn = turns,
+                                   files = sorted(changed), unrelated = unrelated,
+                                   verification = verification)
                         self._save_memory(quiet=True)
                         continue
                     outcome = OUTCOME.COMPLETED
@@ -361,6 +443,10 @@ class DeepSeekAgent:
             err = f'{type(e).__name__}:{e}'
             print(f'[run failed]: agent run failed: {err}')
             self._save_memory(quiet=True)
+        # Every exit path reports the same truth: a run that ended with an edit
+        # nothing has exercised is not verified, whether it finished, ran out of
+        # turns, stopped on a budget or failed outright.
+        verified = unverified == 0
         result = Result(
             outcome = outcome,
             calls = calls,
@@ -378,7 +464,9 @@ class DeepSeekAgent:
             verified = verified,
             mutations = mutated,
             model_calls = ACCOUNT.calls,
-            usage_by_source = ACCOUNT.by_source
+            usage_by_source = ACCOUNT.by_source,
+            verification = verification,
+            unverified_files = tuple(sorted(changed))
         )
         TRACE.emit('run_end', outcome = outcome, turns = turns, calls = calls, ok = ok,
                    failed_by_tag = by_tag, calls_by_tool = by_tool,
@@ -388,7 +476,8 @@ class DeepSeekAgent:
                    cost = round(budget.cost, 6), stopped_by = stopped_by,
                    verified = verified, mutations = mutated, nudges = nudges,
                    wall = round(result.wall, 4), err = err,
-                   model_calls = ACCOUNT.calls, usage_by_source = ACCOUNT.by_source)
+                   model_calls = ACCOUNT.calls, usage_by_source = ACCOUNT.by_source,
+                   verification = verification, unverified_files = sorted(changed))
         ACCOUNT.detach()
         return result
 
