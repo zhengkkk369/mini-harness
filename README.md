@@ -643,6 +643,8 @@ gh workflow run CI
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
 | `tests/test_embed.py` | the embedders, the cache, rank fusion, and the lexical fallback |
+| `tests/test_embed_quality.py` | the retrieval-quality measurement: its corpus, its labelling, its provider path |
+| `tests/test_model_eval_doc.py` | that every number MODEL_EVAL.md quotes is the number the recorded run produced |
 | `tests/test_selector.py` | the exposure budget, the ranking, `find_tools`, and the refusal of a hidden call |
 | `tests/test_skills.py` | skill parsing, the prompt index, loading, tool pinning, and that a skill grants no permission |
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |

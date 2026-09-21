@@ -413,6 +413,11 @@ executed. Both paths are covered in `tests/test_selector.py`.
   one. The measured part is the plumbing: batching, the cache, normalisation, the
   cosine scan and the fallback. A real embeddings endpoint is needed to say
   anything about quality, and the harness's default provider does not offer one.
+  `bench/embed_quality.py` is that measurement, ready to run: it uses a provider
+  when `MINI_HARNESS_EMBED_BASE_URL` is set and the stand-in otherwise, and labels
+  which one it used in its output. Its corpus is paraphrase-shaped -- a query and
+  its fact share no content word -- because that is the case lexical scoring
+  cannot serve.
 
 ## Files
 

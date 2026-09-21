@@ -1,0 +1,41 @@
+{
+  "offline": true,
+  "provider": null,
+  "model": "text-embedding-3-small",
+  "distractors": 60,
+  "rows": [
+    {
+      "backend": "lexical",
+      "model": "none",
+      "entries": 66,
+      "queries": 6,
+      "top1": 3,
+      "top3": 4,
+      "embed_calls": 0,
+      "embed_texts": 0,
+      "median_ms": 1.6759000136516988
+    },
+    {
+      "backend": "vector",
+      "model": "hash-local",
+      "entries": 66,
+      "queries": 6,
+      "top1": 3,
+      "top3": 5,
+      "embed_calls": 7,
+      "embed_texts": 72,
+      "median_ms": 7.367400001385249
+    },
+    {
+      "backend": "hybrid",
+      "model": "hash-local",
+      "entries": 66,
+      "queries": 6,
+      "top1": 4,
+      "top3": 4,
+      "embed_calls": 7,
+      "embed_texts": 72,
+      "median_ms": 7.352349988650531
+    }
+  ]
+}

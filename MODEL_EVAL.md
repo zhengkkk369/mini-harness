@@ -148,7 +148,8 @@ are denied by policy.
 | passed | 8/8 |
 | nudges fired | **8 — exactly one per run** |
 | `verified` | `0/2` on every task |
-| median turns | 9–12 |
+| median turns | 9 |
+| total tokens | 435,474 |
 | cost | $0.0181 |
 
 - **It fires under its precondition.** With verification impossible, every run
@@ -186,10 +187,10 @@ not a solution — the rule the prompt states is enforced rather than trusted.
 | `sample_variance` | the sample (n-1) definition, one value, and an empty list |
 Thirty runs: three tasks, two configurations, five repeats.
 
-| config | passed | nudges | median turns | median tokens | total cost |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `baseline` | 15/15 | **0** | 9 | 50,212 | $0.0343 |
-| `no_verify` | 15/15 | **0** | 8 | 43,858 | $0.0404 |
+| config | passed | median turns | total tokens | total cost |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 15/15 | 9 | 955,492 | $0.0343 |
+| `no_verify` | 15/15 | 8 | 1,134,305 | $0.0404 |
 
 Three readings, and the second one is the point:
 
@@ -220,10 +221,10 @@ the total exactly, differ by at most one cent, and the extra cents go to the
 leftmost parts — and whose obvious implementation, an even division, does not sum
 to the total. Nothing in the sandbox checks it.
 
-| config | passed | nudges | median turns | total tokens | cost |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `baseline` | 6/6 | 0 | 7 | 287,035 | $0.0102 |
-| `no_verify` | 6/6 | 0 | 7 | 263,081 | $0.0109 |
+| config | passed | median turns | total tokens | total cost |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 6/6 | 7 | 287,035 | $0.0102 |
+| `no_verify` | 6/6 | 7 | 263,081 | $0.0109 |
 
 The model reached for the remainder distribution on the first attempt in all
 twelve runs, so this experiment also measured the model rather than the loop.
@@ -242,10 +243,10 @@ finished is to run the suite:
 
 Twelve runs (2 tasks, 2 configurations, 3 repeats):
 
-| config | passed | median turns | total tokens | cost |
+| config | passed | median turns | total tokens | total cost |
 | --- | ---: | ---: | ---: | ---: |
-| `baseline` | 6/6 | 6 | 210,247 | $0.0079 |
-| `no_verify` | 6/6 | 7 | 193,962 | $0.0074 |
+| `baseline` | 6/6 | 6.5 | 210,247 | $0.0079 |
+| `no_verify` | 6/6 | 6 | 193,962 | $0.0074 |
 
 **The ceiling did not move, and the nudge still never fired.** All twelve runs
 passed, with no nudges in either configuration: the model reads the shipped
@@ -256,9 +257,9 @@ A weaker model was the other lever, and it did not move either. The same twelve
 runs against `deepseek-chat` (the non-reasoning model, `--model deepseek-chat`)
 also passed 12/12 with no nudges:
 
-| config | passed | median turns | total tokens | cost |
+| config | passed | median turns | total tokens | total cost |
 | --- | ---: | ---: | ---: | ---: |
-| `baseline` | 6/6 | 7 | 207,343 | $0.0075 |
+| `baseline` | 6/6 | 6 | 207,343 | $0.0075 |
 | `no_verify` | 6/6 | 6 | 226,547 | $0.0081 |
 
 That is three task shapes (prose-only, shipped suite, multi-file long-horizon)

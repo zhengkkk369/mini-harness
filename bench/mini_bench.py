@@ -870,6 +870,58 @@ def render(rows: list) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def aggregate(rows: list, config: str) -> dict:
+    """The per-configuration summary these documents quote.
+
+    Median turns over every row in the configuration, totals for tokens and cost,
+    and `passed` as ``n/m``. One definition, so a table in a document cannot mean
+    something different from the artifact it claims to summarise -- which it did:
+    one table's "median tokens" column was a total, another's medians were taken
+    over an even number of rows and rounded to a whole turn.
+    """
+    group = [row for row in rows if row['config'] == config]
+    if not group:
+        raise ValueError(f'no rows for configuration {config!r}')
+    turns = sorted(row['turns'] for row in group)
+    return {
+        'config': config,
+        'passed': f"{sum(1 for row in group if row['passed'])}/{len(group)}",
+        'median_turns': turns[len(turns) // 2] if len(turns) % 2
+                        else (turns[len(turns) // 2 - 1] + turns[len(turns) // 2]) / 2,
+        'total_tokens': sum(row['prompt_tokens'] + row['completion_tokens'] for row in group),
+        'total_cost': sum(row['cost'] for row in group),
+        'nudges': sum(row['nudges'] for row in group),
+        'subagent_failures': sum(len(row.get('subagent_failures') or []) for row in group),
+        'runs': len(group),
+    }
+
+
+def summary_row(summary: dict) -> str:
+    """The table row the documents carry: one line per configuration."""
+    return (f"| `{summary['config']}` | {summary['passed']} | "
+            f"{summary['median_turns']:g} | {summary['total_tokens']:,} | "
+            f"${summary['total_cost']:.4f} |")
+
+
+def apply_overrides(configs: dict, model: str = None, sub_model: str = None,
+                    prices: dict = None) -> dict:
+    """Fold the command line's overrides into every configuration.
+
+    ``--model`` is the headroom lever: a suite every configuration solves says
+    nothing about either, so a weaker model is the other way to look for a
+    difference. Prices apply to all configurations for the same reason.
+    """
+    for overrides in configs.values():
+        if model:
+            overrides['model_main'] = model
+        if sub_model:
+            overrides['model_sub'] = sub_model
+        for name, value in (prices or {}).items():
+            if value is not None:
+                overrides[name] = value
+    return configs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--out', default='MINI_BENCH.json')
@@ -892,19 +944,9 @@ def main() -> int:
     tasks = [t for t in TASKS if not args.tasks or t.name in args.tasks]
     WORK.mkdir(parents=True, exist_ok=True)
 
-    if args.price_in is not None or args.price_out is not None:
-        for overrides in configs.values():
-            overrides['price_in'] = args.price_in
-            overrides['price_out'] = args.price_out
-            if args.price_cache_in is not None:
-                overrides['price_cache_in'] = args.price_cache_in
-    # A weaker or stronger model is the other way to find headroom: a suite that
-    # every configuration solves says nothing about either.
-    for overrides in configs.values():
-        if args.model:
-            overrides['model_main'] = args.model
-        if args.sub_model:
-            overrides['model_sub'] = args.sub_model
+    apply_overrides(configs, model = args.model, sub_model = args.sub_model,
+                    prices = {'price_in': args.price_in, 'price_out': args.price_out,
+                              'price_cache_in': args.price_cache_in})
 
     rows = []
     for name, overrides in configs.items():

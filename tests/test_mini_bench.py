@@ -313,3 +313,32 @@ def test_a_run_without_subagents_shows_a_dash(tmp_path):
     ]
 
     assert '| - |' in mini_bench.render(rows)
+
+
+# ------------------------------------------------------------------ command-line overrides
+
+
+def test_the_model_override_reaches_every_configuration():
+    """A weaker model is the other way to look for headroom."""
+    configs = {'baseline': {}, 'no_verify': {'verify_required': False}}
+
+    mini_bench.apply_overrides(configs, model='deepseek-chat', sub_model='deepseek-chat')
+
+    assert configs == {'baseline': {'model_main': 'deepseek-chat', 'model_sub': 'deepseek-chat'},
+                       'no_verify': {'verify_required': False, 'model_main': 'deepseek-chat',
+                                     'model_sub': 'deepseek-chat'}}
+
+
+def test_prices_reach_every_configuration():
+    configs = {'baseline': {}}
+
+    mini_bench.apply_overrides(configs, prices={'price_in': 0.15, 'price_out': 0.6,
+                                                'price_cache_in': None})
+
+    assert configs['baseline'] == {'price_in': 0.15, 'price_out': 0.6}
+
+
+def test_no_override_leaves_the_configurations_alone():
+    configs = {'baseline': {'verify_required': False}}
+
+    assert mini_bench.apply_overrides(configs) == {'baseline': {'verify_required': False}}
