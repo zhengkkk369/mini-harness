@@ -15,6 +15,7 @@ class Tag:
     EXISTS: str = 'exists'
     NEED_FULL: str = 'need_full'
     POLICY_DENIED: str = 'policy_denied'
+    HIDDEN_TOOL: str = 'hidden_tool'
 
 @dataclass(frozen = True)
 class Level:

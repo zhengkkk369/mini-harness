@@ -14,6 +14,8 @@ Experiments:
     trace      wall time and bytes written with the event trace off vs on
     verify     turns, nudges and the verified flag for the verification loop
     policy     which calls a deny policy refuses, and under which tag
+    recall     whether recall ranks a planted detail first as the archive grows
+    exposure   request schema payload of a tool surface, with and without a budget
 """
 
 import argparse
@@ -28,16 +30,19 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from pydantic import BaseModel, ConfigDict
+
 os.environ.setdefault('DEEPSEEK_API_KEY', 'experiments-offline')
 os.environ.setdefault('PYTHON_DOTENV_DISABLED', '1')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from mini_harness import agent as agent_module  # noqa: E402
-from mini_harness.agent import DeepSeekAgent  # noqa: E402
+from mini_harness.agent import CORE_TOOLS, DeepSeekAgent  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
 from mini_harness.memory import Memory  # noqa: E402
+from mini_harness.selector import SELECTION, select  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
-from mini_harness.tool.box import TOOLS, ToolDefinition  # noqa: E402
+from mini_harness.tool.box import TOOLS, ToolDefinition, find_tools  # noqa: E402
 from mini_harness.trace import TRACE  # noqa: E402
 
 WORK = Path('.experiments').resolve()
@@ -348,6 +353,105 @@ def experiment_recall(sizes):
     return rows
 
 
+# A dozen plausible bridged tools, then deterministic filler. The point is the
+# shape of an external surface -- many tools with unrelated descriptions -- not
+# any particular server.
+EXTERNAL_TOOLS = [
+    ('web_search', 'search the web and return the top results for a query'),
+    ('sql_query', 'run a SQL query against the postgres database'),
+    ('browser_open', 'open a web page in a headless browser and read the text'),
+    ('email_send', 'send an email message to a recipient'),
+    ('slack_post', 'post a message to a slack channel'),
+    ('jira_create', 'create a jira issue in a project'),
+    ('pdf_render', 'render a PDF document to images'),
+    ('chart_plot', 'draw a chart from numeric data'),
+    ('vector_search', 'search a vector index for similar documents'),
+    ('s3_upload', 'upload a file to an s3 bucket'),
+    ('k8s_apply', 'apply a kubernetes manifest to a cluster'),
+    ('stripe_charge', 'charge a credit card through stripe'),
+]
+
+
+class ExternalInput(BaseModel):
+    """Stand-in for the arguments model an MCP tool is given."""
+
+    model_config = ConfigDict(extra='forbid')
+    text: str = ''
+
+
+def _external_tool(name, description):
+    def run(args: ExternalInput, cfg=None) -> str:
+        return 'ok'
+
+    return ToolDefinition(name, description, ExternalInput, run, False)
+
+
+def external_surface(count):
+    tools = [_external_tool(name, description) for name, description in EXTERNAL_TOOLS]
+    while len(tools) < count:
+        index = len(tools)
+        tools.append(_external_tool(f'plugin_tool_{index:02d}',
+                                    f'plugin capability number {index} for {FILLER[index % len(FILLER)]}'))
+    return tools[:count]
+
+
+def _payload_chars(definitions):
+    """What the request carries: the schemas, serialised the way they are sent."""
+    return len(json.dumps(box._to_api_tool(definitions)))
+
+
+def experiment_exposure(external, budgets, task):
+    """Schema payload of the tool surface, with the budget off and on.
+
+    ``chars / 4`` is the usual rough token estimate; the file reports characters
+    so the arithmetic stays checkable rather than presented as a measurement.
+    """
+    SELECTION.reset()
+    definitions = list(TOOLS) + external_surface(external)
+    pinned = tuple(tool.name for tool in definitions if tool.name in CORE_TOOLS)
+    rows = []
+    for budget in budgets:
+        chosen = select(task, definitions, always=pinned, budget=budget)
+        rows.append({
+            'budget': budget,
+            'external': external,
+            'exposed': len(chosen),
+            'hidden': len(definitions) - len(chosen),
+            'schema_chars': _payload_chars(chosen),
+            'est_tokens': round(_payload_chars(chosen) / 4),
+        })
+    baseline = rows[0]['schema_chars']
+    for row in rows:
+        row['vs_no_budget'] = round(row['schema_chars'] / baseline, 4)
+    return rows
+
+
+def experiment_recovery(external, budget, task, want):
+    """A hidden tool has to be reachable again through find_tools.
+
+    Returns one row, in a list, so it renders like the other experiments.
+    """
+    SELECTION.reset()
+    definitions = list(TOOLS) + external_surface(external)
+    SELECTION.register(definitions)
+    pinned = tuple(tool.name for tool in definitions if tool.name in CORE_TOOLS)
+    before = [tool.name for tool in select(task, definitions, always=pinned, budget=budget)]
+    query = next(tool.description for tool in definitions if tool.name == want)
+    find_tools(box.FindToolsInput(query=query, limit=1))
+    after = [tool.name for tool in select(task, definitions, always=pinned, budget=budget)]
+    return [{
+        'task': task,
+        'budget': budget,
+        'external': external,
+        'wanted': want,
+        'query': query,
+        'exposed_before': before,
+        'exposed_after': after,
+        'hidden_before': want not in before,
+        'recovered': want in after and want not in before,
+    }]
+
+
 def experiment_policy():
     """Which calls a deny policy refuses, and under which tag."""
     workdir = WORK / 'policy'
@@ -414,6 +518,21 @@ def render(results):
     lines += ['', '## Dispatch policy', '', '| call | ok | tag |', '| --- | --- | --- |']
     for row in results['policy']:
         lines.append(f"| {row['call']} | {row['ok']} | {row['tag']} |")
+    lines += ['', '## Tool exposure', '',
+              'Serialised schemas for the built-in tools plus a bridged surface of N '
+              'tools, budget 0 meaning "expose everything".',
+              '', '| bridged tools | budget | exposed | hidden | schema chars | est. tokens | vs no budget |',
+              '| ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for row in results['exposure']:
+        lines.append(f"| {row['external']} | {row['budget']} | {row['exposed']} | {row['hidden']} | "
+                     f"{row['schema_chars']} | {row['est_tokens']} | {row['vs_no_budget']:.2f}x |")
+    lines += ['', '## Hidden tool recovery', '',
+              'A tool the budget hid, asked for by its own description through find_tools.', '',
+              '| wanted | hidden before | budget | exposed before | recovered |',
+              '| --- | --- | ---: | ---: | --- |']
+    for row in results['recovery']:
+        lines.append(f"| {row['wanted']} | {'yes' if row['hidden_before'] else 'no'} | {row['budget']} | "
+                     f"{len(row['exposed_before'])} | {'yes' if row['recovered'] else 'no'} |")
     return '\n'.join(lines) + '\n'
 
 
@@ -438,6 +557,8 @@ def main():
         'verify': experiment_verify(args.repeats),
         'recall': experiment_recall((50, 200, 800)),
         'policy': experiment_policy(),
+        'exposure': experiment_exposure(24, (0, 8, 12), 'fix the failing test in the parser'),
+        'recovery': experiment_recovery(24, 8, 'fix the failing test in the parser', 'vector_search'),
     }
     report = render(payload)
     print(report)

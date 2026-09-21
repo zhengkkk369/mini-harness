@@ -114,6 +114,11 @@ class Config:
     verify_required: bool = True
     verify_nudges: int = 1
 
+    # Tool exposure. Zero sends every tool on every request; a positive budget
+    # ranks the tools against the task and keeps the best of them, with the
+    # built-ins and anything find_tools pulled in always present.
+    tool_budget: int = 0
+
     # Retrievable memory. Compaction is lossy, so what it removes stays
     # searchable through the recall tool.
     recall_enabled: bool = True
@@ -214,8 +219,6 @@ E7. - Prefer these tools over shell redirection; they track state and write atom
       returned with the refusal. Read it and repeat the call.
     - Line numbers in tool output are display only. Never put them in old_string or
       new_string.
-    - Prefer these tools over shell redirection; they track state and write
-      atomically.
 
 E8. Prefer run_sandbox to execute generated code: a fresh Python 3.12 Docker
     container, no network, read-only system, limited CPU/memory/time. It starts at
@@ -269,6 +272,10 @@ O3. recall: once context compaction has replaced earlier turns with a summary, u
     recall(query) to search the removed text instead of guessing or re-reading
     files. It is the only way back to a detail the summary dropped, such as an
     exact path, value, command or error message.
+
+O4. find_tools: when the tool you would reach for is not in the current list, call
+    find_tools(query) with what you want to do. The matching tools become callable
+    from the next turn. Do not claim a capability is missing before trying this.
     """
 
     @property
@@ -385,7 +392,8 @@ def build_config() -> Config:
             overrides[name] = float(value)
     if trace := os.environ.get('MINI_HARNESS_TRACE'):
         overrides['trace_path'] = trace
-    for name in ('max_parallel_tools', 'verify_nudges', 'recall_limit', 'recall_snippet'):
+    for name in ('max_parallel_tools', 'verify_nudges', 'recall_limit', 'recall_snippet',
+                 'tool_budget'):
         if value := os.environ.get(f'MINI_HARNESS_{name.upper()}'):
             if int(value) <= 0:
                 raise ValueError(f'{name} must be positive')

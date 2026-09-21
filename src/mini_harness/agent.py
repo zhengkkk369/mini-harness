@@ -12,8 +12,15 @@ from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
 from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, _atomic_write, log_tool, WRITE_TOOLS
+from mini_harness.selector import SELECTION, select
 from mini_harness.tool.tag import OUTCOME, MARK
 from mini_harness.tool.block import CLIP
+
+# Always exposed, whatever the budget: the escape hatch itself, plus the tools
+# the locate/understand workflow starts from. Everything else -- the write, shell
+# and delegation tools, and anything bridged in from MCP -- has to earn its place
+# or be pulled back in by find_tools.
+CORE_TOOLS = frozenset({'find_tools', 'read_file', 'grep_file', 'glob_file'})
 
 VERIFY_TOOLS = {'run_bash', 'run_sandbox'}
 VERIFY_NUDGE = (
@@ -43,8 +50,12 @@ class Result:
 
 class DeepSeekAgent:
     def __init__(self, tools: list, cfg = CONFIG) -> None:
+        self.definitions = list(tools)
         self.tools = _to_api_tool(tools)
         self.regis = {t.name: t for t in tools}
+        self.pinned = tuple(t.name for t in tools if t.name in CORE_TOOLS)
+        self.task = ''
+        self._exposed = tuple(t.name for t in tools)
         self.last_prompt_tokens = 0
         self.printed = ''
         self.system = [
@@ -58,6 +69,20 @@ class DeepSeekAgent:
         self.last_usage = None
         self.last_reasoning = ''
         return
+
+    def _expose(self, cfg = CONFIG) -> list:
+        """The tool list for the next request, honouring the exposure budget.
+
+        Rebuilt only when the exposed set changes, because generating a JSON
+        Schema for every tool on every turn is not free.
+        """
+        chosen = select(self.task, self.definitions, always = self.pinned,
+                        budget = cfg.tool_budget)
+        names = tuple(definition.name for definition in chosen)
+        if names != self._exposed:
+            self._exposed = names
+            self.tools = _to_api_tool(chosen)
+        return self.tools
 
     def _load_memory(self, cfg = CONFIG) -> list:
         if Path(self.session_memory).exists():
@@ -193,7 +218,9 @@ class DeepSeekAgent:
                     break
                 turns += 1
                 self.printed = ''
-                TRACE.emit('turn', turn = turns)
+                self.tools = self._expose(cfg)
+                executer.hidden = {definition.name for definition in self.definitions} - set(self._exposed)
+                TRACE.emit('turn', turn = turns, tools = len(self.tools))
                 if self.last_prompt_tokens >= cfg.compact_limit:
                     self.message = COMPACT.compact_content(client, self.message, self.session_memory, cfg = cfg)
                     self._save_memory(quiet=True)
@@ -310,6 +337,8 @@ class DeepSeekAgent:
         return result
 
     def run_task(self, task: str, cfg = CONFIG) -> Result:
+        SELECTION.register(self.definitions)
+        self.task = task
         TRACE.configure(cfg.trace_path)
         TRACE.emit('run_start', mode = 'task', profile = cfg.profile, model = cfg.model_main,
                    task = task, turns_limit = cfg.max_turns_main,
@@ -348,6 +377,7 @@ class DeepSeekAgent:
         return
                                             
     def run(self, cfg = CONFIG) -> None:
+        SELECTION.register(self.definitions)
         TRACE.configure(cfg.trace_path)
         self.message = self._load_memory(cfg = cfg)
         client = OpenAI(
@@ -380,6 +410,7 @@ class DeepSeekAgent:
             self.message.append(
                 {'role': 'user', 'content': user_input}
             )
+            self.task = user_input
             pending_exits = False
             TRACE.emit('run_start', mode = 'repl', profile = cfg.profile, model = cfg.model_main,
                        task = user_input, turns_limit = cfg.max_turns_main,

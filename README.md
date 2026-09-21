@@ -323,6 +323,46 @@ The client reads UTF-8 regardless of console locale, so the failure is entirely
 server-side — and it looks like the server crashing rather than an encoding
 problem.
 
+## On-demand tool exposure
+
+Every tool schema is sent on every request, so the tool surface is a fixed cost
+per turn whether or not the model uses it. It is bounded for the built-ins and
+unbounded once servers are attached: a bridged surface of 24 tools plus the
+built-ins serialises to about 17,900 characters (~4,500 tokens) of schema on
+every single request.
+
+`tool_budget` caps how many tools are exposed. Tools are ranked against the
+current task — the same IDF scoring `recall` uses — and the best matches fill the
+budget:
+
+```sh
+export MINI_HARNESS_TOOL_BUDGET=12   # unset (default) exposes every tool
+```
+
+Two rules keep the cap safe rather than lossy:
+
+- **The core four are never hidden** — `find_tools`, `read_file`, `grep_file`,
+  `glob_file`. Locating and reading is where every task starts, and `find_tools`
+  is the way back to everything else.
+- **A tool the model asked for stays exposed**, and a call to a hidden tool is
+  answered with an instruction to use `find_tools` rather than executed. Guessing
+  a name gets nowhere, so nothing is reachable only by luck.
+
+```
+[find_tools]: 1 of 35 tools match 'search a vector index for similar documents'; they are available from the next turn
+
+- vector_search: search a vector index for similar documents
+```
+
+With 24 bridged tools and a budget of 8, the request carries 5,834 characters
+instead of 17,869 — a third of the schema payload — and the ranked tool is back
+in one call. The measurement, including that recovery, is in
+[EXPERIMENTS.md](EXPERIMENTS.md).
+
+The budget is off by default, and deliberately conservative when on: the ranking
+is lexical, so a task whose wording does not resemble a tool description is
+exactly where a cap would hurt. The `bench` profile pins it to `0`.
+
 ## Get started
 
 ### 1. Download and install
@@ -404,6 +444,7 @@ uv run --locked pytest
 | `tests/test_parallel.py` | batch overlap (proved with a barrier, not a stopwatch) and eligibility |
 | `tests/test_policy.py` | deny rules, read-only mode and dispatch attribution |
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
+| `tests/test_selector.py` | the exposure budget, the ranking, `find_tools`, and the refusal of a hidden call |
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
 | `tests/test_history.py` | repairing a stored conversation so the API accepts it |
 | `tests/test_tui.py` | the TUI worker protocol, driven as a real subprocess in demo mode |

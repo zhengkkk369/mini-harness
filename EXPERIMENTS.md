@@ -2,7 +2,7 @@
 
 Measurements of the mini-harness mechanisms added in this repository: parallel
 tool execution, subagent concurrency, the event trace, retrievable memory, the
-verification loop, and the dispatch policy.
+verification loop, the dispatch policy, and the tool-exposure budget.
 
 ## What these numbers are, and what they are not
 
@@ -207,6 +207,41 @@ before approval, so a denied call never reaches the human at all — asserted in
 In `read_only` mode the same rules deny `write_file`, `edit_file`, `run_bash`,
 `run_sandbox` and `run_subagent` while leaving reads alone.
 
+## 7. Tool exposure
+
+The built-in tools plus a synthetic bridged surface of 24 tools, serialised the
+way the request carries them. Budget `0` means "expose everything".
+
+| Bridged tools | Budget | Exposed | Hidden | Schema chars | Est. tokens | vs no budget |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 24 | 0 | 35 | 0 | 17,869 | 4,467 | 1.00x |
+| 24 | 8 | 8 | 27 | 5,834 | 1,458 | 0.33x |
+| 24 | 12 | 12 | 23 | 8,977 | 2,244 | 0.50x |
+
+The task behind these rows is `fix the failing test in the parser`. The four
+always-exposed tools are `find_tools`, `read_file`, `grep_file` and `glob_file`;
+the rest of the budget goes to the best-ranked matches, which for that task are
+`edit_file`, `run_sandbox`, `browser_open` and `run_bash`.
+
+A budget of 8 costs a third of the schema payload. Characters are reported
+rather than tokens so the arithmetic stays checkable; `chars / 4` is the usual
+rough estimate and is labelled as such.
+
+## 8. Hidden tool recovery
+
+Hiding a tool is only safe if the model can get it back. The experiment hides
+`vector_search` behind the budget above, then asks `find_tools` for it in its own
+words (the tool's description, which is what a model has to work from).
+
+| Wanted | Hidden before | Budget | Exposed before | Recovered |
+| --- | --- | ---: | ---: | --- |
+| `vector_search` | yes | 8 | 8 | yes |
+
+Recovery is by construction rather than by ranking luck: `find_tools` adds the
+name to a pinned set that survives the next selection, and a call to a hidden
+tool is refused with the instruction to use `find_tools` instead of being
+executed. Both paths are covered in `tests/test_selector.py`.
+
 ## Limitations
 
 - **No model.** Task success, prompt-following and whether a nudge actually
@@ -233,6 +268,11 @@ In `read_only` mode the same rules deny `write_file`, `edit_file`, `run_bash`,
 - **Retrieval was measured on synthetic text.** Five planted facts per size,
   against filler that shares vocabulary with the queries. Real conversation
   queries are messier, and the useful message may share no rare token with them.
+- **The exposure experiment measures a payload, not a request.** It counts the
+  serialised schemas of the tools a budget selects. The token column is a
+  `chars / 4` estimate, not a tokenizer count, and the bridged surface is
+  synthetic filler rather than a real server. The recovery path is real: it runs
+  the shipped `find_tools` and selection code.
 
 ## Files
 
@@ -242,4 +282,5 @@ In `read_only` mode the same rules deny `write_file`, `edit_file`, `run_bash`,
 | `EXPERIMENTS.json` | raw results of the recorded run |
 | `tests/test_parallel.py` | overlap is proved with a barrier, not a stopwatch |
 | `tests/test_policy.py` | policy decisions and dispatch attribution |
+| `tests/test_selector.py` | the exposure budget, `find_tools`, and the hidden-call refusal |
 | `tests/test_trace.py` | trace format, flushing and failure handling |

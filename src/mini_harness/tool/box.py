@@ -22,6 +22,7 @@ from openai import OpenAI
 from mini_harness.config import CONFIG
 from mini_harness.memory import Memory, journal_path
 from mini_harness.policy import Policy, DENY
+from mini_harness.selector import SELECTION, rank_definitions
 from mini_harness.trace import TRACE
 from mini_harness.tool.path import validate_read, validate_write, is_denied, _resolve_file
 from mini_harness.tool.block import TODO, CLIP, SUBAGENT
@@ -170,6 +171,11 @@ class ToolExecution:
         self.policy = policy if policy is not None else Policy.from_config(cfg, READ_ONLY_DENIED)
         self.last_tool = None
         self.files = {}
+        # Names the exposure budget kept out of the request. They stay callable
+        # -- hiding is a cost decision, not a permission one -- but a call to one
+        # is turned into an instruction instead of being silently obeyed, so the
+        # model cannot reach a tool it was never told it had by guessing.
+        self.hidden: set = set()
         # Approvals collected on the calling thread before a batch fans out.
         self.approvals = {}
         # Read-only batches run concurrently, so the file-state bookkeeping and
@@ -350,6 +356,11 @@ class ToolExecution:
         tool = self.regis.get(tool_call.function.name)
         if tool is None:
             return ToolItem(f'[{TAG.UNKNOWN_TOOL}]: the tool is unknown, please check the tool map {'\n'.join(self.regis)}', False, TAG.UNKNOWN_TOOL)
+
+        if tool_call.function.name in self.hidden:
+            return ToolItem(f'[{TAG.HIDDEN_TOOL}]: {tool_call.function.name} is not in the current tool '
+                            f'list. Call find_tools with what you want to do to bring it back, then '
+                            f'retry.', False, TAG.HIDDEN_TOOL)
 
         try:
             args = tool.parameters.model_validate_json(tool_call.function.arguments)
@@ -614,6 +625,23 @@ def recall(inp: RecallInput, cfg = CONFIG) -> str:
             text = f'{text[:cfg.recall_snippet]}... [{len(text) - cfg.recall_snippet} more chars]'
         when = time.strftime('%H:%M:%S', time.localtime(hit.ts)) if hit.ts else 'unknown time'
         lines.append(f'\n--- {hit.role} (score {hit.score:.2f}, archived {when}) ---\n{text}')
+    return '\n'.join(lines)
+
+class FindToolsInput(BaseModel):
+    model_config = ConfigDict(extra = 'forbid')
+    query: Nonblank = Field(description = 'what you want to do, in a few words')
+    limit: int = Field(6, ge = 1, le = 20, description = 'how many tools to bring in')
+
+def find_tools(inp: FindToolsInput, cfg = CONFIG) -> str:
+    """Bring matching tools into play for the rest of the run."""
+    catalog = SELECTION.catalog or TOOLS
+    picked = rank_definitions(inp.query, catalog)[:inp.limit]
+    SELECTION.activate(definition.name for definition in picked)
+    TRACE.emit('find_tools', query = inp.query, picked = [d.name for d in picked],
+               catalog = len(catalog))
+    lines = [f'[find_tools]: {len(picked)} of {len(catalog)} tools match {inp.query!r}; '
+             'they are available from the next turn']
+    lines.extend(f'\n- {definition.name}: {definition.description}' for definition in picked)
     return '\n'.join(lines)
 
 class RunBashInput(BaseModel):
@@ -934,6 +962,7 @@ TOOLS = [
     ToolDefinition('run_sandbox', 'Run code in a disposable Docker Python 3.12 container with no network and resource limits. Only sandbox/ is shared, as /workspace; writes there persist. Requires Docker and a locally pulled python:3.12-slim image. Prefer this for running generated code; run_bash executes on the host.', RunSandboxInput, run_sandbox, True),
     ToolDefinition('run_todo', 'build and update the todo list', RunTodoInput, run_todo, False),
     ToolDefinition('recall', 'Search the earlier part of this conversation that context compaction removed and replaced with a summary. Use it when you need a detail the summary no longer carries, such as an exact value, path, command or error message from earlier.', RecallInput, recall, False),
+    ToolDefinition('find_tools', 'Find tools that are not currently available and bring them into play for the rest of the run. Use it when you need a capability you do not appear to have, for example a browser, a database, or another MCP server.', FindToolsInput, find_tools, False),
     ToolDefinition('run_subagent', 'build and run the subagent to finish the task', RunSubAgentInput, run_subagent, True)
 ]
 

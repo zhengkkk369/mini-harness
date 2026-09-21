@@ -127,7 +127,9 @@ O2. run_subagent is available (explore_agent, coding_agent, planning_agent). Use
 #
 #   verify_required  an unverified edit would cost an extra turn
 #   parallel_tools   read batches would overlap instead of running in order
-#   recall_enabled   the run would carry a tenth tool and an extra prompt line
+#   recall_enabled   the run would carry an eleventh tool and an extra prompt line
+#   tool_budget      a non-zero cap would hide tools and shorten the prompt
+#   mcp_servers      an attached server would add tools the recorded run lacked
 #
 # They stay available; a run that wants them can set them through the
 # environment. Anything not listed here keeps its default, and the tool set
@@ -147,5 +149,7 @@ BENCH_OVERRIDE: dict = {
     'verify_required': False,
     'parallel_tools': False,
     'recall_enabled': False,
+    'tool_budget': 0,
+    'mcp_servers': (),
     'system_prompt': BENCH_PROMPT
 }

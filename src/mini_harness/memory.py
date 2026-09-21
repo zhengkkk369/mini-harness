@@ -45,8 +45,33 @@ def journal_path(cfg = CONFIG) -> Path:
     """Where the compaction journal lives for a run using this config."""
     return journal_for(cfg.session_path, cfg)
 
-def _tokens(text: str) -> list:
+def tokens(text: str) -> list:
     return TOKEN.findall(text.lower())
+
+def rank(terms: set, tokenised: list) -> list:
+    """(index, score) for every document that matches, best first.
+
+    Token overlap weighted by inverse document frequency, so a term appearing in
+    one document outweighs one appearing in all of them. Shared by the journal
+    search and the tool selector so both rank the same way.
+    """
+    if not terms or not tokenised:
+        return []
+    total = len(tokenised)
+    document_frequency = {term: sum(1 for doc in tokenised if term in doc) for term in terms}
+    scored = []
+    for index, doc in enumerate(tokenised):
+        counts = Counter(doc)
+        score = 0.0
+        for term in terms:
+            frequency = counts.get(term, 0)
+            if not frequency or not document_frequency[term]:
+                continue
+            score += (1 + math.log(frequency)) * math.log(1 + total / document_frequency[term])
+        if score > 0:
+            scored.append((index, score))
+    scored.sort(key = lambda pair: (-pair[1], pair[0]))
+    return scored
 
 def _message_text(message: dict) -> tuple:
     """(role, searchable text) for one archived message."""
@@ -121,33 +146,24 @@ class Memory:
                 role, text = _message_text(message)
                 if not text.strip():
                     continue
-                entries.append(MemoryEntry(len(entries), ts, role, text, tuple(_tokens(text))))
+                entries.append(MemoryEntry(len(entries), ts, role, text, tuple(tokens(text))))
         return entries
 
     def search(self, query: str, limit: int = 5, role: str|None = None) -> list:
         """Best matches first, ties broken by the order they were archived."""
         entries = self.entries()
-        terms = set(_tokens(query))
+        terms = set(tokens(query))
         if not entries or not terms:
             return []
-        total = len(entries)
-        document_frequency = {term: sum(1 for e in entries if term in e.tokens) for term in terms}
-        scored = []
-        for entry in entries:
+        hits = []
+        for index, score in rank(terms, [entry.tokens for entry in entries]):
+            entry = entries[index]
             if role and entry.role != role:
                 continue
-            counts = Counter(entry.tokens)
-            score = 0.0
-            for term in terms:
-                frequency = counts.get(term, 0)
-                if not frequency or not document_frequency[term]:
-                    continue
-                score += (1 + math.log(frequency)) * math.log(1 + total / document_frequency[term])
-            if score > 0:
-                scored.append((score, entry))
-        scored.sort(key = lambda pair: (-pair[0], pair[1].index))
-        return [MemoryHit(score, entry.role, entry.ts, entry.index, entry.text)
-                for score, entry in scored[:max(0, limit)]]
+            hits.append(MemoryHit(score, entry.role, entry.ts, entry.index, entry.text))
+            if len(hits) >= max(0, limit):
+                break
+        return hits
 
     def stats(self) -> dict:
         entries = self.entries()

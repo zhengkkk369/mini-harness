@@ -28,6 +28,7 @@ os.environ.setdefault("DEEPSEEK_API_KEY", "test-dummy-key")
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
 from mini_harness.config import Config  # noqa: E402
+from mini_harness.selector import SELECTION  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.block import TODO  # noqa: E402
 from mini_harness.trace import TRACE  # noqa: E402
@@ -76,6 +77,14 @@ def clean_todo():
     TODO.items = []
     yield
     TODO.items = []
+
+
+@pytest.fixture(autouse=True)
+def clean_selection():
+    """The tool catalogue and the find_tools pins are process-wide too."""
+    SELECTION.reset()
+    yield
+    SELECTION.reset()
 
 
 @pytest.fixture

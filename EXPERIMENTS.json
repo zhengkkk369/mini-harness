@@ -7,46 +7,46 @@
       "latency_ms": 0.0,
       "calls": 6,
       "serial": {
-        "median_ms": 37.2503999969922,
-        "min_ms": 33.42769999289885,
-        "max_ms": 69.61000000592321
+        "median_ms": 37.01270000601653,
+        "min_ms": 34.18000000237953,
+        "max_ms": 53.8593000092078
       },
       "parallel": {
-        "median_ms": 23.585999995702878,
-        "min_ms": 21.726600010879338,
-        "max_ms": 25.172100009513088
+        "median_ms": 22.85670000128448,
+        "min_ms": 22.612200002186,
+        "max_ms": 29.30299998843111
       },
-      "speedup": 1.5793436786135349
+      "speedup": 1.6193369998265945
     },
     {
       "latency_ms": 5.0,
       "calls": 6,
       "serial": {
-        "median_ms": 71.92919999943115,
-        "min_ms": 66.89650000771508,
-        "max_ms": 77.19280000310391
+        "median_ms": 71.29569999233354,
+        "min_ms": 67.88490001054015,
+        "max_ms": 75.66360000055283
       },
       "parallel": {
-        "median_ms": 27.139000012539327,
-        "min_ms": 24.78940000582952,
-        "max_ms": 28.82379999209661
+        "median_ms": 28.58300000661984,
+        "min_ms": 26.10339999955613,
+        "max_ms": 33.611099992413074
       },
-      "speedup": 2.6503997924093343
+      "speedup": 2.4943392917405944
     },
     {
       "latency_ms": 20.0,
       "calls": 6,
       "serial": {
-        "median_ms": 161.22100000211503,
-        "min_ms": 160.5111999961082,
-        "max_ms": 221.51380000286736
+        "median_ms": 162.95050000189804,
+        "min_ms": 157.63570000126492,
+        "max_ms": 205.35289999679662
       },
       "parallel": {
-        "median_ms": 42.68099999171682,
-        "min_ms": 41.13040000083856,
-        "max_ms": 43.87720000522677
+        "median_ms": 42.6863000029698,
+        "min_ms": 40.92869999294635,
+        "max_ms": 45.857100005378015
       },
-      "speedup": 3.7773482353600785
+      "speedup": 3.817395745017983
     }
   ],
   "subagents": [
@@ -54,52 +54,52 @@
       "latency_ms": 20.0,
       "calls": 4,
       "serial": {
-        "median_ms": 82.44939999713097,
-        "min_ms": 81.60869999846909,
-        "max_ms": 82.85350000369363
+        "median_ms": 82.40239998849574,
+        "min_ms": 81.98619999166112,
+        "max_ms": 82.77319998887833
       },
       "parallel": {
-        "median_ms": 24.13659999729134,
-        "min_ms": 23.723800011794083,
-        "max_ms": 24.904999998398125
+        "median_ms": 24.13449999585282,
+        "min_ms": 23.777599999448285,
+        "max_ms": 24.925600009737536
       },
-      "speedup": 3.4159492226073103
+      "speedup": 3.414299032615362
     },
     {
       "latency_ms": 100.0,
       "calls": 4,
       "serial": {
-        "median_ms": 402.5414999923669,
-        "min_ms": 401.8754999997327,
-        "max_ms": 423.5571000026539
+        "median_ms": 402.65659999568015,
+        "min_ms": 402.12749999773223,
+        "max_ms": 432.77600000146776
       },
       "parallel": {
-        "median_ms": 103.99909999978263,
-        "min_ms": 103.65869999805,
-        "max_ms": 104.2206999991322
+        "median_ms": 104.23939999600407,
+        "min_ms": 103.07620000094175,
+        "max_ms": 105.73879998992197
       },
-      "speedup": 3.8706248418804416
+      "speedup": 3.8628061943095955
     }
   ],
   "trace": [
     {
       "trace": "off",
-      "median_ms": 103.4362000063993,
-      "min_ms": 92.0888999971794,
-      "max_ms": 160.07770001306199,
+      "median_ms": 127.90060001134407,
+      "min_ms": 121.16390001028776,
+      "max_ms": 139.4505000062054,
       "bytes": 0
     },
     {
       "trace": "on",
-      "median_ms": 98.16559999308083,
-      "min_ms": 95.17590000177734,
-      "max_ms": 120.03579999145586,
-      "bytes": 10868
+      "median_ms": 153.1061999994563,
+      "min_ms": 141.94669999415055,
+      "max_ms": 241.6339000046719,
+      "bytes": 11434
     },
     {
       "trace": "overhead",
-      "delta_ms": -5.270600013318472,
-      "bytes": 10868
+      "delta_ms": 25.205599988112226,
+      "bytes": 11434
     }
   ],
   "verify": [
@@ -135,7 +135,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 0.5078999965917319
+      "search_ms": 0.6641999934799969
     },
     {
       "distractors": 200,
@@ -143,7 +143,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 1.1617999989539385
+      "search_ms": 1.3686000020243227
     },
     {
       "distractors": 800,
@@ -151,7 +151,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 3.8743000040994957
+      "search_ms": 6.083300002501346
     }
   ],
   "policy": [
@@ -174,6 +174,66 @@
       "call": "read_file: tree/f000.py",
       "ok": true,
       "tag": "success"
+    }
+  ],
+  "exposure": [
+    {
+      "budget": 0,
+      "external": 24,
+      "exposed": 35,
+      "hidden": 0,
+      "schema_chars": 17869,
+      "est_tokens": 4467,
+      "vs_no_budget": 1.0
+    },
+    {
+      "budget": 8,
+      "external": 24,
+      "exposed": 8,
+      "hidden": 27,
+      "schema_chars": 5834,
+      "est_tokens": 1458,
+      "vs_no_budget": 0.3265
+    },
+    {
+      "budget": 12,
+      "external": 24,
+      "exposed": 12,
+      "hidden": 23,
+      "schema_chars": 8977,
+      "est_tokens": 2244,
+      "vs_no_budget": 0.5024
+    }
+  ],
+  "recovery": [
+    {
+      "task": "fix the failing test in the parser",
+      "budget": 8,
+      "external": 24,
+      "wanted": "vector_search",
+      "query": "search a vector index for similar documents",
+      "exposed_before": [
+        "glob_file",
+        "grep_file",
+        "read_file",
+        "find_tools",
+        "edit_file",
+        "run_sandbox",
+        "browser_open",
+        "run_bash"
+      ],
+      "exposed_after": [
+        "glob_file",
+        "grep_file",
+        "read_file",
+        "find_tools",
+        "vector_search",
+        "edit_file",
+        "run_sandbox",
+        "browser_open"
+      ],
+      "hidden_before": true,
+      "recovered": true
     }
   ]
 }
