@@ -14,16 +14,24 @@
 
 ## Why mini-harness?
 
-- **Small, but complete.** About 2,700 lines of Python: ten tools, context
-  compaction, request retries, streaming responses, and session memory.
-- **Tested offline.** `uv run pytest` runs 482 tests with no network, no API key
+- **Small, but complete.** About 3,100 lines of Python across 20 modules: eleven
+  tools, context compaction, request retries, streaming responses, and session
+  memory.
+- **Tested offline.** `uv run pytest` runs 554 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
-  gates, the ten tools, context compaction, retrievable memory, MCP bridging,
-  configuration, the sandbox command builder, and the TUI's worker protocol.
+  gates, the tools, context compaction, retrievable memory, tool exposure,
+  embedding backends, MCP bridging, configuration, the sandbox command builder,
+  and the TUI's worker protocol.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
   The definition contract is enforced in code, not just written in the prompt,
   and tools can be bridged in from an [MCP](https://modelcontextprotocol.io) server.
+- **Memory that survives compaction, and a tool surface that can be capped.**
+  What compaction removes stays searchable through `recall`, ranked lexically by
+  default or by any embeddings provider behind a
+  [pluggable backend](src/mini_harness/embed.py). When the tool list grows past a
+  budget, the best-ranked tools are exposed and `find_tools` is the way back to
+  the rest.
 - **Bounded and observable.** Optional token, cost and wall-clock budgets stop a
   run before it gets expensive, and an opt-in JSONL [trace](src/mini_harness/trace.py)
   records every turn, tool call, retry and compaction. The measured cost of that
