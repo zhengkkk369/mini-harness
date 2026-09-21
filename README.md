@@ -17,13 +17,14 @@
 - **Small, but complete.** About 3,100 lines of Python across 20 modules: eleven
   tools, context compaction, request retries, streaming responses, and session
   memory.
-- **Tested offline.** `uv run pytest` runs 591 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 640 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the tools, context compaction, retrievable memory, tool exposure,
   embedding backends, MCP bridging, configuration, the sandbox command builder,
-  the benchmark's own tasks, the recorded experiment numbers, and the TUI's
-  worker protocol. A further 13 checks drive a real Docker engine when one is
-  running.
+  the benchmark's own tasks, the recorded experiment numbers, the trajectory
+  builder, and the TUI's worker protocol. A further 13 checks drive a real
+  Docker engine when one is running, and CI runs the suite on Ubuntu 3.12 and
+  3.13 and on Windows.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
   The definition contract is enforced in code, not just written in the prompt,
@@ -511,6 +512,19 @@ skips itself unless Docker is running and `python:3.12-slim` is already pulled.
 ```sh
 uv run --locked pytest
 uv run --locked pytest tests/test_sandbox_live.py   # the live sandbox checks, if Docker is up
+```
+
+CI runs that command on Ubuntu with Python 3.12 and 3.13 and on Windows with
+3.12. The Windows entry is not decoration: the portability defects this
+repository collected — a POSIX-only `os.getuid()`, a pipe decoded with the
+machine's locale codec, `npx.CMD` not being spawnable by name, a log directory
+hardcoded to `/logs/agent` — were all invisible to a Linux-only matrix, and the
+first Windows run caught one more. GitHub disables automatic triggers on a forked
+repository until its owner enables them in the Actions tab, so on a fresh fork
+run it by hand until then:
+
+```sh
+gh workflow run CI
 ```
 
 | File | Covers |
