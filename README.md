@@ -356,6 +356,19 @@ export MINI_HARNESS_MCP_SERVERS='fs=python -m fs_server /tmp;db=python -m db_ser
 uv run --locked mini-harness
 ```
 
+A server that needs a credential names it, and receives only that:
+
+```sh
+export GITHUB_TOKEN=...
+export MINI_HARNESS_MCP_SERVERS='gh=env(GITHUB_TOKEN) npx -y @modelcontextprotocol/server-github'
+```
+
+`env(...)` is recognised only as a prefix immediately after the `=`, and only
+when the parentheses hold a comma-separated list of variable names, so a command
+that happens to contain `env(` elsewhere is left as written. A name that is not
+set is reported before the server starts, rather than surfacing later as a
+puzzling authentication failure inside the server.
+
 Entries are separated by semicolons because a command contains spaces. Each is
 `name=command`, and its tools appear as `name__tool`, so two servers cannot
 collide. The CLI and the TUI own the server processes and stop them when the run
@@ -390,11 +403,15 @@ servers tested actually pages its list, so that path is only covered by tests.
 ### What a server does not receive
 
 Each server gets the same environment as the agent's shell, and credential-shaped
-variables are filtered out of that. A server authenticating through
-`GITHUB_TOKEN`, `BRAVE_API_KEY` or anything matching `*KEY*`, `*TOKEN*`,
-`*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*_PWD` or `*AUTH*` receives nothing and
-has to read its own configuration instead. There is also no per-server
-environment, so two servers cannot be given different values of one variable.
+variables are filtered out of that. A variable matching `*KEY*`, `*TOKEN*`,
+`*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*_PWD` or `*AUTH*` is dropped unless
+that specific server named it with `env(...)`, which is the only way in and is
+per server: granting one server `GITHUB_TOKEN` does not hand it to the others, and
+the value comes from the real environment rather than from the filtered copy. A
+server that still needs configuration of its own should read its own file — the
+grant list is a convenience, not a general environment mechanism. Two servers
+cannot be given *different values* of one variable; they can only be given the
+same value or nothing.
 
 ### What MCP tools are not subject to
 

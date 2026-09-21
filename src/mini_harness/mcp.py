@@ -16,6 +16,7 @@ Two deliberate choices:
 """
 
 import json
+import os
 import queue
 import re
 import shlex
@@ -55,22 +56,70 @@ class MCPError(RuntimeError):
 # instead of sitting out its whole timeout.
 CLOSED = object()
 
+ENV_PREFIX = 'env('
+ENV_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+def _split_env(command: str, name: str) -> tuple[tuple, str]:
+    """(allowed variable names, command) for one server spec.
+
+    A server may name the variables it is allowed to receive, which is the only
+    way past the credential filter the agent's own environment goes through:
+
+        gh=env(GITHUB_TOKEN) npx -y @modelcontextprotocol/server-github
+
+    The prefix is only recognised immediately after the name and only when the
+    parenthesised part is a comma-separated list of variable names, so a command
+    that happens to contain ``env(`` elsewhere is left alone.
+    """
+    text = command.strip()
+    if not text.startswith(ENV_PREFIX):
+        return (), command
+    closing = text.find(')')
+    if closing == -1:
+        raise ValueError(f'[mcp]: {name!r} opens env( without closing it')
+    names = tuple(part.strip() for part in text[len(ENV_PREFIX):closing].split(',') if part.strip())
+    for variable in names:
+        if not ENV_NAME.match(variable):
+            raise ValueError(f'[mcp]: {name!r} names {variable!r}, which is not a variable name')
+    return names, text[closing + 1:].strip()
+
 def parse_servers(specs) -> list:
-    """Turn ``name=command line`` specs into (name, argv) pairs."""
+    """Turn ``name=command line`` specs into (name, argv, allowed variables)."""
     servers = []
     for spec in specs or ():
         if not isinstance(spec, str) or '=' not in spec:
             raise ValueError(f'[mcp]: a server spec must look like name=command, got {spec!r}')
         name, _, command = spec.partition('=')
         name = name.strip()
+        allowed, command = _split_env(command, name)
         try:
             argv = shlex.split(command)
         except ValueError as error:
             raise ValueError(f'[mcp]: cannot parse the command for {name!r}: {error}') from None
         if not name or not argv:
             raise ValueError(f'[mcp]: a server spec must look like name=command, got {spec!r}')
-        servers.append((name, argv))
+        servers.append((name, argv, allowed))
     return servers
+
+def server_env(base, allowed, environ=None) -> dict:
+    """The environment one server gets: the filtered base, plus what it named.
+
+    The base is what the agent's own shell gets, credential-shaped variables
+    already removed. A name in ``allowed`` is taken from the real environment and
+    added back for this server only, so trusting a server with one token does not
+    hand every server every token.
+    """
+    environ = os.environ if environ is None else environ
+    env = dict(base or {})
+    for variable in allowed:
+        if variable in environ:
+            env[variable] = environ[variable]
+    return env
+
+def missing_env(allowed, environ=None) -> list:
+    """Named variables that are not set, so a silent start is not mistaken for success."""
+    environ = os.environ if environ is None else environ
+    return [variable for variable in allowed if variable not in environ]
 
 def tool_name(server: str, tool: str) -> str:
     """A registry-safe name that says which server the tool came from."""
@@ -354,8 +403,16 @@ class MCPBridge:
     failures: dict = field(default_factory = dict)
 
     def start(self) -> 'MCPBridge':
-        for name, argv in parse_servers(self.cfg.mcp_servers):
-            client = MCPClient(name, argv, timeout = self.cfg.mcp_timeout, env = self.cfg.bash_env)
+        for name, argv, allowed in parse_servers(self.cfg.mcp_servers):
+            absent = missing_env(allowed)
+            if absent:
+                # Say it now rather than letting the server fail later with a
+                # message about a missing token nobody connected to this line.
+                print(f'[mcp]: {name} asked for {", ".join(absent)}, which is not set')
+                TRACE.emit('mcp_error', server = name, error = 'missing_env',
+                           message = f'not set: {", ".join(absent)}')
+            client = MCPClient(name, argv, timeout = self.cfg.mcp_timeout,
+                               env = server_env(self.cfg.bash_env, allowed))
             try:
                 client.start()
                 tools = client.list_tools()
@@ -371,7 +428,7 @@ class MCPBridge:
             self.definitions.extend(client.definition(tool, risky = self.cfg.mcp_risky)
                                     for tool in tools)
             TRACE.emit('mcp_server', server = name, tools = [t.get('name') for t in tools],
-                       pages = getattr(client, 'pages', 1),
+                       env = list(allowed), pages = getattr(client, 'pages', 1),
                        server_info = getattr(client, 'server_info', None))
         return self
 

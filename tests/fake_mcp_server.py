@@ -9,9 +9,14 @@ with test_). Flags exist only to make failure modes reachable:
     --binary          emit a line containing bytes that are not valid UTF-8
     --paginate=N      answer tools/list in pages of N
     --paginate-loop   always return a nextCursor, however many pages are read
+
+The `environment` tool reports which named variables this process can see, so the
+bridge's per-server environment can be checked end to end rather than by reading
+its code.
 """
 
 import json
+import os
 import sys
 
 # The protocol is UTF-8 on stdout. A Python server on a non-UTF-8 console has to
@@ -49,6 +54,12 @@ TOOLS = [
         'inputSchema': {'type': 'object', 'properties': {}},
     },
     {
+        'name': 'environment',
+        'description': 'Report which named environment variables this process can see.',
+        'inputSchema': {'type': 'object',
+                        'properties': {'names': {'type': 'string', 'description': 'comma separated'}}},
+    },
+    {
         'name': 'no schema',
         'description': 'A name that is not registry safe.',
         'inputSchema': {'type': 'object', 'properties': {'x': {'type': 'string'}}},
@@ -84,6 +95,14 @@ def call_tool(request_id, name, arguments) -> None:
         result(request_id, {'content': [{'type': 'text', 'text': 'boom'}], 'isError': True})
     elif name == 'slow':
         pass
+    elif name == 'environment':
+        # Reports which of the variables it was asked about it can actually see,
+        # so the bridge's per-server environment can be checked end to end.
+        wanted = str(arguments.get('names', '')).split(',')
+        seen = {variable: ('set' if os.environ.get(variable.strip()) else 'unset')
+                for variable in wanted if variable.strip()}
+        result(request_id, {'content': [{'type': 'text',
+                                         'text': json.dumps(seen, sort_keys=True)}]})
     else:
         error(request_id, -32602, f'unknown tool {name!r}')
 

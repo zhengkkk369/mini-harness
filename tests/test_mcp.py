@@ -9,6 +9,7 @@ import shlex
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -16,13 +17,17 @@ from pydantic import ValidationError
 
 from mini_harness import mcp
 from mini_harness.mcp import (
-    MCPBridge, MCPClient, MCPError, model_from_schema, parse_servers, tool_name,
+    MCPBridge, MCPClient, MCPError, missing_env, model_from_schema, parse_servers, server_env,
+    tool_name,
 )
 from mini_harness.tool import box
 from mini_harness.trace import TRACE
 from tests.conftest import REGISTRY, call
 
 STUB = Path(__file__).resolve().parent / 'fake_mcp_server.py'
+# Quoted the way a real spec has to be: shlex.split runs on the command, and on
+# Windows an unquoted interpreter path loses its backslashes.
+STUB_COMMAND = shlex.join([sys.executable, str(STUB)])
 
 
 def stub_spec(*flags, name='stub'):
@@ -58,7 +63,7 @@ def registry_with(definitions):
 
 def test_a_spec_is_a_name_and_a_command():
     assert parse_servers(['fs=python -m server --root /tmp']) == [
-        ('fs', ['python', '-m', 'server', '--root', '/tmp'])]
+        ('fs', ['python', '-m', 'server', '--root', '/tmp'], ())]
 
 
 def test_no_specs_means_no_servers():
@@ -75,6 +80,129 @@ def test_a_malformed_spec_is_rejected(spec):
 def test_unbalanced_quotes_are_reported():
     with pytest.raises(ValueError, match='cannot parse the command'):
         parse_servers(['bad=python "unclosed'])
+
+
+# --------------------------------------------------------------------------- per-server env
+
+
+def test_a_server_can_name_the_variables_it_receives():
+    assert parse_servers(['gh=env(GITHUB_TOKEN) npx -y server-github']) == [
+        ('gh', ['npx', '-y', 'server-github'], ('GITHUB_TOKEN',))]
+
+
+def test_several_variables_are_allowed_and_spaces_do_not_matter():
+    specs = parse_servers(['gh=env( GITHUB_TOKEN , BRAVE_API_KEY ) run-server'])
+
+    assert specs == [('gh', ['run-server'], ('GITHUB_TOKEN', 'BRAVE_API_KEY'))]
+
+
+def test_an_empty_env_list_grants_nothing():
+    assert parse_servers(['gh=env() run-server']) == [('gh', ['run-server'], ())]
+
+
+def test_a_command_that_merely_contains_env_is_left_alone():
+    """Only a prefix immediately after the name is a grant."""
+    specs = parse_servers(['s=bash -c "printenv; env(FOO) bar"'])
+
+    assert specs[0][2] == ()
+    assert 'env(FOO)' in ' '.join(specs[0][1])
+
+
+def test_an_unclosed_env_list_is_rejected():
+    with pytest.raises(ValueError, match='without closing it'):
+        parse_servers(['gh=env(GITHUB_TOKEN run-server'])
+
+
+def test_a_non_variable_name_in_the_list_is_rejected():
+    with pytest.raises(ValueError, match='not a variable name'):
+        parse_servers(['gh=env(9TOKEN) run-server'])
+
+
+def test_the_allowed_variables_are_added_to_the_filtered_environment():
+    base = {'PATH': '/bin', 'HOME': '/home/x'}
+    environ = {'PATH': '/bin', 'HOME': '/home/x', 'GITHUB_TOKEN': 'secret', 'AWS_KEY': 'nope'}
+
+    env = server_env(base, ('GITHUB_TOKEN',), environ=environ)
+
+    assert env['GITHUB_TOKEN'] == 'secret'
+    assert env['PATH'] == '/bin'
+    assert 'AWS_KEY' not in env, 'a variable nobody named stays out'
+
+
+def test_an_unnamed_credential_stays_filtered():
+    """The default is unchanged: the filter is what a server gets unless it asks."""
+    base = {'PATH': '/bin'}
+    environ = {'PATH': '/bin', 'GITHUB_TOKEN': 'secret'}
+
+    assert 'GITHUB_TOKEN' not in server_env(base, (), environ=environ)
+
+
+def test_a_named_variable_that_is_not_set_is_reported():
+    assert missing_env(('GITHUB_TOKEN', 'BRAVE_API_KEY'), environ={'GITHUB_TOKEN': 'x'}) == [
+        'BRAVE_API_KEY']
+
+
+def bridged_env(cfg, spec, monkeypatch):
+    """Start one stub server with this bridge config and ask what it can see."""
+    monkeypatch.setenv('HARNESS_TEST_TOKEN', 'a-secret')
+    monkeypatch.setenv('MINI_HARNESS_API_KEY', 'must-not-leak')
+    cfg = replace(cfg, mcp_servers=(spec,))
+    bridge = MCPBridge(cfg).start()
+    try:
+        registry = {definition.name: definition for definition in bridge.definitions}
+        tool = registry['stub__environment']
+        # The arguments model is generated from the server's schema, so ask the
+        # definition for it rather than guessing the class name.
+        return json.loads(tool.function(tool.parameters(
+            names='HARNESS_TEST_TOKEN,MINI_HARNESS_API_KEY,PATH')))
+    finally:
+        bridge.close()
+
+
+def test_a_server_that_names_a_variable_receives_it(cfg, monkeypatch):
+    seen = bridged_env(cfg, f'stub=env(HARNESS_TEST_TOKEN) {STUB_COMMAND}', monkeypatch)
+
+    assert seen['HARNESS_TEST_TOKEN'] == 'set'
+
+
+def test_a_server_that_names_nothing_receives_nothing_credential_shaped(cfg, monkeypatch):
+    seen = bridged_env(cfg, f'stub={STUB_COMMAND}', monkeypatch)
+
+    assert seen['HARNESS_TEST_TOKEN'] == 'unset'
+    assert seen['MINI_HARNESS_API_KEY'] == 'unset'
+
+
+def test_naming_one_variable_does_not_open_the_others(cfg, monkeypatch):
+    seen = bridged_env(cfg, f'stub=env(HARNESS_TEST_TOKEN) {STUB_COMMAND}', monkeypatch)
+
+    assert seen['MINI_HARNESS_API_KEY'] == 'unset'
+
+
+def test_the_server_trace_records_what_was_granted(cfg, session_dir, monkeypatch):
+    path = session_dir / 'trace.jsonl'
+    TRACE.configure(path)
+    try:
+        bridged_env(cfg, f'stub=env(HARNESS_TEST_TOKEN) {STUB_COMMAND}', monkeypatch)
+    finally:
+        TRACE.configure(None)
+
+    events = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+    server = [event for event in events if event['event'] == 'mcp_server'][0]
+
+    assert server['env'] == ['HARNESS_TEST_TOKEN']
+
+
+def test_a_missing_variable_is_reported_before_the_server_starts(cfg, capsys, monkeypatch):
+    monkeypatch.delenv('HARNESS_ABSENT_TOKEN', raising=False)
+    cfg = replace(cfg, mcp_servers=(f'stub=env(HARNESS_ABSENT_TOKEN) {STUB_COMMAND}',))
+
+    bridge = MCPBridge(cfg).start()
+    try:
+        printed = capsys.readouterr().out
+        assert 'HARNESS_ABSENT_TOKEN' in printed
+        assert 'not set' in printed
+    finally:
+        bridge.close()
 
 
 # --------------------------------------------------------------------------- schema conversion
@@ -143,7 +271,7 @@ def test_a_client_starts_and_lists_tools(cfg):
     with client_of(cfg) as client:
         tools = client.list_tools()
     assert [tool['name'] for tool in tools] == [
-        'echo', 'add', 'optional', 'fail', 'slow', 'no schema']
+        'echo', 'add', 'optional', 'fail', 'slow', 'environment', 'no schema']
     assert client.server_info == {'name': 'stub', 'version': '1'}
     assert client.pages == 1
 
@@ -154,8 +282,8 @@ def test_a_paginated_tool_list_is_assembled(cfg):
         tools = client.list_tools()
 
     assert [tool['name'] for tool in tools] == [
-        'echo', 'add', 'optional', 'fail', 'slow', 'no schema']
-    assert client.pages == 3
+        'echo', 'add', 'optional', 'fail', 'slow', 'environment', 'no schema']
+    assert client.pages == 4
 
 
 def test_an_endless_cursor_is_bounded(cfg):
@@ -168,7 +296,7 @@ def test_an_endless_cursor_is_bounded(cfg):
 
 def test_the_bridge_registers_tools_from_every_page(bridge_of):
     bridge = bridge_of(stub_spec('--paginate=2'))
-    assert len(bridge.definitions) == 6
+    assert len(bridge.definitions) == 7
 
 
 def test_the_trace_records_how_many_pages_were_read(cfg_factory, session_dir):
@@ -183,8 +311,8 @@ def test_the_trace_records_how_many_pages_were_read(cfg_factory, session_dir):
 
     events = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
     server = next(event for event in events if event['event'] == 'mcp_server')
-    assert server['pages'] == 3
-    assert len(server['tools']) == 6
+    assert server['pages'] == 4
+    assert len(server['tools']) == 7
 
 
 def test_the_command_is_resolved_through_path(monkeypatch):
@@ -381,7 +509,7 @@ def test_the_bridge_registers_every_tool_it_finds(bridge_of):
     names = [definition.name for definition in bridge.definitions]
     assert 'stub__echo' in names
     assert 'stub__no_schema' in names
-    assert len(names) == 6
+    assert len(names) == 7
 
 
 def test_a_broken_server_does_not_stop_the_run(bridge_of):
