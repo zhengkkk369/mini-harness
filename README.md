@@ -154,6 +154,19 @@ Cost stays at zero unless both prices are set, so a token budget needs no
 pricing data. `Result` reports `cost` and which budget stopped the run, and the
 CLI turns a spent budget into exit code 5.
 
+**One ledger per run.** Every model call reports its usage to the same place,
+whoever made it: the main loop's turns, the compaction summariser, and every
+subagent. The token totals, `cost` and the budget therefore cover a run's real
+spend, and `Result.usage_by_source` says where it went
+(`main`, `compact`, `subagent:<type>`). A subagent shares the run's budget, so a
+run that has spent it does not keep paying for subtasks; a subagent that finds
+the budget already spent returns "stopped" instead of starting.
+
+A spent budget also stops work **inside** a turn: when the next request has
+already been made and its tool calls would only be usable by a request the budget
+will refuse, the calls are answered with a `[skipped]` placeholder rather than
+run, and the pairing is kept so the session can still be resumed.
+
 Set `MINI_HARNESS_TRACE` to a path to record what the run actually did. The
 [trace](src/mini_harness/trace.py) is an append-only JSONL file, one object per
 event, with a monotonic `seq` and a `ts`: `run_start`, `turn`, `usage`,

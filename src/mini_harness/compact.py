@@ -5,6 +5,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.budget import ACCOUNT, SOURCE_COMPACT
 from mini_harness.memory import journal_for
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
@@ -48,7 +49,8 @@ Please summarize those conversation history into a working summary report, follo
 {hits_con}
 """
 
-    def _request_agent(self, client: OpenAI, user_prompt: str, cfg = CONFIG) -> str|None:
+    def _request_agent(self, client: OpenAI, user_prompt: str, cfg = CONFIG):
+        """(summary, usage): the caller bills the usage to the run's ledger."""
         response = client.chat.completions.create(
             **cfg.request_options(sub=True),
             messages = [
@@ -63,7 +65,10 @@ Please summarize those conversation history into a working summary report, follo
             ],
             stream = False
         )
-        return response.choices[0].message.content
+        usage = getattr(response, 'usage', None)
+        if usage is not None:
+            ACCOUNT.record(usage, source = SOURCE_COMPACT)
+        return response.choices[0].message.content, usage
 
     def _compact_text(self, cut: int, response: str, message: list, cfg = CONFIG) -> list:
         note = ''
@@ -85,7 +90,8 @@ Please summarize those conversation history into a working summary report, follo
         start = time.time()
         print(f'[compact content]: compacting the content....')
         try:
-            response = retry_call(lambda: self._request_agent(client, user_prompt, cfg = cfg), cfg = cfg)
+            response, usage = retry_call(lambda: self._request_agent(client, user_prompt, cfg = cfg),
+                                        cfg = cfg)
             if session_path is not None:
                 try:
                     hist = journal_for(session_path, cfg = cfg)
@@ -102,7 +108,9 @@ Please summarize those conversation history into a working summary report, follo
         end = time.time() -start
         print(f'[compact content]: compact done -- {end:.1f}s')
         TRACE.emit('compact', removed = len(old), kept = len(message) - cut, ok = True,
-                   seconds = round(end, 4))
+                   seconds = round(end, 4),
+                   prompt = getattr(usage, 'prompt_tokens', 0) if usage is not None else 0,
+                   completion = getattr(usage, 'completion_tokens', 0) if usage is not None else 0)
         return message_new
 
 

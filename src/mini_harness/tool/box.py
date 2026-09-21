@@ -20,6 +20,7 @@ from enum import Enum
 from openai import OpenAI
 
 from mini_harness.config import CONFIG
+from mini_harness.budget import ACCOUNT, SOURCE_SUBAGENT
 from mini_harness.embed import build_embedder
 from mini_harness.memory import Memory, journal_path
 from mini_harness.policy import Policy, DENY
@@ -838,13 +839,31 @@ completed the task by giving the summary and analyzing report
         max_retries = 0
     )
     executer = ToolExecution(regis, _for_sub, cfg = cfg)
+    spent_prompt = spent_completion = 0
+    source = f'{SOURCE_SUBAGENT}:{inp.agent_type.value}'
     for turn in range(cfg.max_turns_sub):
+        spent = ACCOUNT.exceeded()
+        if spent is not None:
+            # The parent's budget is the run's budget: a subagent that kept going
+            # would spend money no budget is watching.
+            TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
+                       seconds = round(time.time() - start, 4), ok = False,
+                       reason = f'{spent}-budget', prompt = spent_prompt,
+                       completion = spent_completion)
+            return (f'[subagent {inp.agent_type.value} stopped]: the {spent} budget was spent '
+                    f'after {tool_count} tool call(s); the subtask is unfinished. Do not retry it '
+                    f'without changing the approach.')
         response = retry_call(lambda: client.chat.completions.create(
             **cfg.request_options(sub=True),
             messages = cfg.request_messages(sub_message),
             tools = tool_list,
             stream = False
         ), cfg = cfg)
+        usage = getattr(response, 'usage', None)
+        if usage is not None:
+            ACCOUNT.record(usage, source = source)
+            spent_prompt += getattr(usage, 'prompt_tokens', 0) or 0
+            spent_completion += getattr(usage, 'completion_tokens', 0) or 0
         message = response.choices[0].message
         if message.tool_calls:
             d = message.model_dump(exclude_none = True)
@@ -863,11 +882,13 @@ completed the task by giving the summary and analyzing report
             end = time.time() -start
             print(f'[{inp.agent_type.value}]: {inp.task_description} -- {tool_count} tools -- {end:.1f}s')
             TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
-                       seconds = round(end, 4), ok = True)
+                       seconds = round(end, 4), ok = True, prompt = spent_prompt,
+                       completion = spent_completion)
             return message.content
     else:
         TRACE.emit('subagent_end', agent = inp.agent_type.value, tools = tool_count,
-                   seconds = round(time.time() - start, 4), ok = False, reason = 'exhausted')
+                   seconds = round(time.time() - start, 4), ok = False, reason = 'exhausted',
+                   prompt = spent_prompt, completion = spent_completion)
         return f'[agent done]: the agent run out of the turns for the actions, the task is incompleted'
     
 

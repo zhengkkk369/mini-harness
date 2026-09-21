@@ -360,6 +360,13 @@ def test_wall_budget_stops_the_run(cfg_factory, monkeypatch):
 
 
 def test_token_budget_stops_the_run(cfg_factory):
+    """A spent budget does not start new work.
+
+    The request that spent the budget is already paid for, but the tool calls it
+    asked for are not run: their results could only be used by the next request,
+    which the budget check at the top of the turn will refuse. Running them would
+    be wasted work and, for a write, an unwanted side effect on a finished run.
+    """
     cfg = cfg_factory(token_budget=100)
     write(cfg.work_space / "sandbox" / "f.py", "alpha\n")
     agent, client = make_agent(
@@ -372,9 +379,12 @@ def test_token_budget_stops_the_run(cfg_factory):
     assert result.outcome == OUTCOME.BUDGET
     assert result.stopped_by == "tokens"
     assert result.turns == 1
-    assert result.calls == 1
+    assert result.calls == 0
     assert (result.prompt_total, result.completion_total) == (90, 20)
     assert len(client.stream_calls) == 1
+    skipped = [message for message in agent.message if message["role"] == "tool"]
+    assert len(skipped) == 1
+    assert "skipped" in skipped[0]["content"]
 
 
 def test_cost_budget_stops_the_run(cfg_factory):
@@ -446,7 +456,10 @@ def test_interrupted_tool_calls_are_closed_off(cfg, workspace):
 
     filler = [m for m in agent.message if m["role"] == "tool"]
     assert filler[0]["tool_call_id"] == pending[0].id
-    assert "intterupted" in filler[0]["content"]
+    # The placeholder names the tool and gives the reason; the API only needs the
+    # id to match, but a human reading the session needs to know what happened.
+    assert filler[0]["content"].startswith("[read_file skipped]:")
+    assert "interrupted" in filler[0]["content"]
 
 
 # --------------------------------------------------------------------------- memory

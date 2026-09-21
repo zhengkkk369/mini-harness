@@ -28,6 +28,7 @@ os.environ.setdefault("DEEPSEEK_API_KEY", "test-dummy-key")
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
 from mini_harness.config import Config  # noqa: E402
+from mini_harness.budget import ACCOUNT  # noqa: E402
 from mini_harness.selector import SELECTION  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.block import TODO  # noqa: E402
@@ -85,6 +86,14 @@ def clean_selection():
     SELECTION.reset()
     yield
     SELECTION.reset()
+
+
+@pytest.fixture(autouse=True)
+def clean_accounting():
+    """The run ledger is process-wide; a leaked budget would bill the next test."""
+    ACCOUNT.reset()
+    yield
+    ACCOUNT.reset()
 
 
 @pytest.fixture

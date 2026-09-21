@@ -272,6 +272,16 @@ Pricing stays optional: unset means cost is zero, and setting
 `price_in`/`price_out` without `price_cache_in` bills cached input at the full
 rate, which is an upper bound rather than an undercount.
 
+**Accounting basis, and what changed.** The dollar and token figures recorded in
+this document were produced when the ledger only saw the main loop's turns. The
+compaction summariser and any subagent made their own requests that no budget and
+no reported total accounted for. `ACCOUNT` now bills every model call
+(`Result.usage_by_source` splits them by `main` / `compact` / `subagent:<type>`),
+so **a re-run of these experiments would report higher token and cost figures for
+the same work** — the runs above used no subagents and compacted rarely, so the
+gap should be small, but the numbers are not directly comparable across that
+change.
+
 ## 3. The MCP bridge, against a real server
 
 The bridge was validated against the actual
@@ -495,7 +505,9 @@ task instead of 500.
   A turn's tokens are bounded by `max_tokens_main`, but its wall time is bounded
   by the shell timeout, and the budget only looks again at the next turn
   boundary. The run had already fixed the code, so it also shows that the
-  benchmark scores the artifact and not the outcome.
+  benchmark scores the artifact and not the outcome. The check has since been
+  repeated before a tool batch runs, which bounds the overshoot to one request
+  rather than a request plus its batch; a single long tool call can still overrun.
 - **Prices move, and peak is double off-peak.** The cost figures come from the
   provider's published rates on the day, at off-peak. Re-check them before
   quoting any of these numbers, and pass `--price-in`, `--price-out` and

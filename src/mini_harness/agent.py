@@ -4,10 +4,10 @@ import time
 
 from openai import OpenAI, LengthFinishReasonError
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 from mini_harness.config import CONFIG
-from mini_harness.budget import Budget, STOP_WALL, cached_tokens
+from mini_harness.budget import ACCOUNT, Budget, STOP_WALL, cached_tokens, SOURCE_MAIN
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
@@ -46,6 +46,8 @@ class Result:
     stopped_by: str = ''
     verified: bool = True
     mutations: int = 0
+    model_calls: int = 0
+    usage_by_source: dict = field(default_factory = dict)
 
 
 class DeepSeekAgent:
@@ -169,18 +171,29 @@ class DeepSeekAgent:
         return response, truncated
 
     def _fill_interrupted(self, tool_calls, cfg = CONFIG) -> None:
-        done = [t['tool_call_id'] for t in self.message if t['role'] == 'tool']
+        self._fill_skipped(tool_calls, 'the run was interrupted before this call ran', cfg = cfg)
+        return
+
+    def _fill_skipped(self, tool_calls, reason: str, cfg = CONFIG) -> None:
+        """Answer every call that will never run, so the conversation stays valid.
+
+        The chat API rejects an assistant message whose tool calls have no
+        results, so a run stopped mid-batch has to close the pairing before it
+        can end -- and before the session can be resumed.
+        """
+        done = {t['tool_call_id'] for t in self.message if t['role'] == 'tool'}
         for tool_call in tool_calls:
             if tool_call.id not in done:
                 self.message.append(
-                    {'role': 'tool', 'tool_call_id': tool_call.id, 'content': f'[intterupted]: the tool {tool_call.function.name} is intterupted'}
+                    {'role': 'tool', 'tool_call_id': tool_call.id,
+                     'content': f'[{tool_call.function.name} skipped]: {reason}'}
                 )
         return
 
     def _run_turn(self, client: OpenAI, executer: ToolExecution, cfg = CONFIG) -> Result:
         start = time.time()
         outcome = OUTCOME.ERROR
-        turns = calls = ok = last_prompt = prompt_total = completion_total = 0
+        turns = calls = ok = last_prompt = 0
         err = ''
         stopped_by = ''
         mutated = unverified = nudges = 0
@@ -188,6 +201,9 @@ class DeepSeekAgent:
         by_tag = {}
         by_tool = {}
         budget = Budget.from_config(cfg, started = start)
+        # One run, one ledger. Everything that calls a model reports here, so the
+        # token totals and the budget cover the summariser and the subagents too.
+        ACCOUNT.reset().attach(budget)
 
         def record_usage(usage) -> int:
             """Fold one response's usage into the totals, the budget and the trace.
@@ -195,16 +211,11 @@ class DeepSeekAgent:
             Returns this response's cached input count, which is what a per-turn
             event should carry; only run_end reports the cumulative figure.
             """
-            nonlocal last_prompt, prompt_total, completion_total
+            nonlocal last_prompt
             prompt = getattr(usage, 'prompt_tokens', 0) or 0
-            completion = getattr(usage, 'completion_tokens', 0) or 0
-            cached = cached_tokens(usage)
             self.last_prompt_tokens = prompt
             last_prompt = prompt
-            prompt_total += prompt
-            completion_total += completion
-            budget.add(prompt, completion, cached)
-            return cached
+            return ACCOUNT.record(usage, source = SOURCE_MAIN)
 
         try:
             for turn in range(cfg.max_turns_main):
@@ -252,6 +263,24 @@ class DeepSeekAgent:
                     print()
                     d = message.model_dump(exclude_none = True)
                     self.message.append(d)
+                    # The turn began before the request; a long request can spend
+                    # the wall budget on its own. Check again before the batch, so
+                    # a spent budget costs one request rather than a request plus
+                    # a whole batch of tool calls.
+                    spent = budget.exceeded()
+                    if spent is not None:
+                        stopped_by = spent
+                        outcome = OUTCOME.TIMEOUT if spent == STOP_WALL else OUTCOME.BUDGET
+                        self._fill_skipped(message.tool_calls,
+                                           f'{spent} budget was spent before this batch could run',
+                                           cfg = cfg)
+                        print(f'[{spent} budget]: agent stopped at {budget.render()} '
+                              f'(limits: {budget.limits()}), {len(message.tool_calls)} call(s) skipped')
+                        TRACE.emit('budget_stop', reason = spent, tokens = budget.tokens,
+                                   cost = round(budget.cost, 6), elapsed = round(budget.elapsed, 4),
+                                   skipped = len(message.tool_calls))
+                        self._save_memory(quiet=True)
+                        break
                     try:
                         results = executer.execute_batch(message.tool_calls, cfg = cfg)
                         for tool_call, res in zip(message.tool_calls, results):
@@ -316,8 +345,8 @@ class DeepSeekAgent:
             turns = turns,
             ok = ok,
             last_prompt=last_prompt,
-            prompt_total = prompt_total,
-            completion_total=completion_total,
+            prompt_total = ACCOUNT.prompt_total,
+            completion_total=ACCOUNT.completion_total,
             failed_by_tag=by_tag,
             calls_by_tool=by_tool,
             wall = time.time() -start,
@@ -325,15 +354,20 @@ class DeepSeekAgent:
             cost = budget.cost,
             stopped_by = stopped_by,
             verified = verified,
-            mutations = mutated
+            mutations = mutated,
+            model_calls = ACCOUNT.calls,
+            usage_by_source = ACCOUNT.by_source
         )
         TRACE.emit('run_end', outcome = outcome, turns = turns, calls = calls, ok = ok,
                    failed_by_tag = by_tag, calls_by_tool = by_tool,
-                   prompt_tokens = prompt_total, completion_tokens = completion_total,
-                   cached_tokens = budget.cached_tokens,
+                   prompt_tokens = ACCOUNT.prompt_total,
+                   completion_tokens = ACCOUNT.completion_total,
+                   cached_tokens = ACCOUNT.cached_total,
                    cost = round(budget.cost, 6), stopped_by = stopped_by,
                    verified = verified, mutations = mutated, nudges = nudges,
-                   wall = round(result.wall, 4), err = err)
+                   wall = round(result.wall, 4), err = err,
+                   model_calls = ACCOUNT.calls, usage_by_source = ACCOUNT.by_source)
+        ACCOUNT.detach()
         return result
 
     def run_task(self, task: str, cfg = CONFIG) -> Result:
