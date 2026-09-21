@@ -521,7 +521,7 @@ questions:
 
 ```sh
 uv run python -m bench.experiments     # offline, scripted client, no API key
-uv run python -m bench.mini_bench      # real model, 15 tasks x 4 configurations
+uv run python -m bench.mini_bench      # real model, 16 tasks x 4 configurations
 uv run python -m bench.tui_run         # drive the TUI headlessly (needs textual)
 ```
 

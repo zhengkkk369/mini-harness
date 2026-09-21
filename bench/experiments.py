@@ -279,30 +279,63 @@ def experiment_verify(repeats):
 
 
 def experiment_trace(repeats, turns):
-    """The cost of recording every event."""
+    """The cost of recording every event, measured in pairs.
+
+    The first version of this experiment timed one condition and then the other
+    and subtracted the medians, which measured whatever the machine was doing in
+    between: at 804 events it reported a *negative* overhead of 252 ms, because
+    the second block ran while the first block's work was still being written
+    back. Recording the two conditions alternately, in the same repeat, and
+    taking the median of the paired differences removes that drift.
+    """
     workdir = WORK / 'trace'
     write_tree(workdir, 1)
-    read = call('read_file', file_path='tree/f000.py')
-    script = [completion(message('', [read])) for _ in range(turns)]
-    script.append(completion(message('done')))
     rows = []
-    for label, enabled in (('off', False), ('on', True)):
-        sizes = []
+    for length in turns:
+        read = call('read_file', file_path='tree/f000.py')
+        script = [completion(message('', [read])) for _ in range(length)]
+        script.append(completion(message('done')))
+        off_times, on_times, deltas = [], [], []
+        events = 0
+        size = 0
 
-        def one_run():
+        def one(label, enabled):
+            nonlocal events, size
             trace_file = workdir / f'trace-{label}.jsonl'
             trace_file.unlink(missing_ok=True)
-            cfg = config_for(workdir, trace_path=str(trace_file) if enabled else None)
+            # The turn limit has to allow the whole script, or the long run
+            # silently stops at the default and measures the wrong length.
+            cfg = config_for(workdir, max_turns_main = length + 2,
+                             trace_path=str(trace_file) if enabled else None)
             TRACE.configure(None)
+            start = time.perf_counter()
             run_scripted(cfg, list(script))
-            sizes.append(trace_file.stat().st_size if trace_file.exists() else 0)
+            elapsed = time.perf_counter() - start
+            if trace_file.exists():
+                size = trace_file.stat().st_size
+                events = len([line for line in trace_file.read_text(encoding='utf-8').splitlines()
+                              if line.strip()])
+            return elapsed
 
-        med, low, high = median_seconds(repeats, one_run)
+        for index in range(repeats):
+            # Alternate which condition goes first, so a drift that favours one
+            # order cancels instead of accumulating.
+            order = (('off', False), ('on', True)) if index % 2 == 0 else (('on', True), ('off', False))
+            pair = {label: one(label, enabled) for label, enabled in order}
+            off_times.append(pair['off'])
+            on_times.append(pair['on'])
+            deltas.append(pair['on'] - pair['off'])
         TRACE.configure(None)
-        rows.append({'trace': label, 'median_ms': med * 1000, 'min_ms': low * 1000,
-                     'max_ms': high * 1000, 'bytes': sizes[-1]})
-    rows.append({'trace': 'overhead', 'delta_ms': rows[1]['median_ms'] - rows[0]['median_ms'],
-                 'bytes': rows[1]['bytes']})
+        for label, samples in (('off', off_times), ('on', on_times)):
+            rows.append({'trace': label, 'turns': length, 'events': events if label == 'on' else 0,
+                         'median_ms': statistics.median(samples) * 1000,
+                         'min_ms': min(samples) * 1000, 'max_ms': max(samples) * 1000,
+                         'bytes': size if label == 'on' else 0})
+        delta = statistics.median(deltas) * 1000
+        rows.append({'trace': 'overhead', 'turns': length, 'events': events, 'bytes': size,
+                     'delta_ms': delta, 'min_delta_ms': min(deltas) * 1000,
+                     'max_delta_ms': max(deltas) * 1000, 'pairs': len(deltas),
+                     'per_event_us': (delta * 1000 / events) if events else 0.0})
     return rows
 
 
@@ -586,14 +619,25 @@ def render(results):
         lines.append(f"| {row['latency_ms']:.0f} ms | {row['calls']} | "
                      f"{row['serial']['median_ms']:.2f} | {row['parallel']['median_ms']:.2f} | "
                      f"{row['speedup']:.2f}x |")
-    lines += ['', '## Event trace', '', '| trace | median (ms) | min (ms) | max (ms) | bytes |',
-              '| --- | ---: | ---: | ---: | ---: |']
+    lines += ['', '## Event trace', '',
+              '| trace | turns | events | median (ms) | min (ms) | max (ms) | bytes |',
+              '| --- | ---: | ---: | ---: | ---: | ---: | ---: |']
     for row in results['trace']:
         if 'median_ms' in row:
-            lines.append(f"| {row['trace']} | {row['median_ms']:.2f} | {row['min_ms']:.2f} | "
+            lines.append(f"| {row['trace']} | {row['turns']} | {row['events']} | "
+                         f"{row['median_ms']:.2f} | {row['min_ms']:.2f} | "
                          f"{row['max_ms']:.2f} | {row['bytes']} |")
         else:
-            lines.append(f"| {row['trace']} | {row['delta_ms']:+.2f} (delta) | | | {row['bytes']} |")
+            lines.append(f"| {row['trace']} | {row['turns']} | {row['events']} | "
+                         f"{row['delta_ms']:+.2f} (delta) | | | {row['bytes']} |")
+    lines += ['', 'Per-event cost, from the paired difference within each repeat:', '',
+              '| turns | events | overhead (ms) | min | max | per event (us) |',
+              '| ---: | ---: | ---: | ---: | ---: | ---: |']
+    for row in results['trace']:
+        if 'per_event_us' in row:
+            lines.append(f"| {row['turns']} | {row['events']} | {row['delta_ms']:+.2f} | "
+                         f"{row['min_delta_ms']:+.2f} | {row['max_delta_ms']:+.2f} | "
+                         f"{row['per_event_us']:.1f} |")
     lines += ['', '## Verification loop', '',
               '| scenario | turns | mutations | nudges | verified | outcome |',
               '| --- | ---: | ---: | ---: | --- | --- |']
@@ -652,7 +696,8 @@ def main():
     parser.add_argument('--repeats', type=int, default=7, help='timed runs per configuration')
     parser.add_argument('--calls', type=int, default=6, help='calls per read batch')
     parser.add_argument('--subagents', type=int, default=4, help='subagents per batch')
-    parser.add_argument('--turns', type=int, default=20, help='tool turns per trace run')
+    parser.add_argument('--turns', type=int, default=20,
+                        help='tool turns in the short trace run; a second run is ten times longer')
     args = parser.parse_args()
 
     shutil.rmtree(WORK, ignore_errors=True)
@@ -663,7 +708,7 @@ def main():
         'repeats': args.repeats,
         'parallel': experiment_parallel(args.repeats, args.calls, (0.0, 0.005, 0.02)),
         'subagents': experiment_subagents(args.repeats, args.subagents, (0.02, 0.1)),
-        'trace': experiment_trace(args.repeats, args.turns),
+        'trace': experiment_trace(args.repeats, (args.turns, args.turns * 10)),
         'verify': experiment_verify(args.repeats),
         'recall': experiment_recall((50, 200, 800)),
         'vector': experiment_vector_recall((50, 200, 800)),

@@ -331,6 +331,41 @@ def check_test_suite(sandbox: Path, body: str, name: str):
     return code == 0, f'exit={code} out={tail(out)!r}'
 
 
+# This one carries no checker at all, on purpose. The contract is stated in
+# prose and is fully determined, but the obvious implementation -- an even
+# division -- is wrong, and being wrong is invisible without running something.
+# It is the only task here shaped to let the verification nudge change the
+# outcome, so it is the only one that can measure the loop's benefit rather
+# than just its firing.
+def setup_split_cents(sandbox: Path) -> None:
+    write(sandbox, 'split.py',
+          'def split_cents(total, parts):\n'
+          '    """Divide an amount in whole cents into that many parts."""\n'
+          '    return [total // parts] * parts\n')
+
+
+def check_split_cents(sandbox: Path, answer: str):
+    code, out = run_python(
+        sandbox,
+        'from split import split_cents\n'
+        'assert split_cents(10, 3) == [4, 3, 3], split_cents(10, 3)\n'
+        'assert split_cents(3, 5) == [1, 1, 1, 0, 0], split_cents(3, 5)\n'
+        'assert split_cents(5, 1) == [5], split_cents(5, 1)\n'
+        'assert split_cents(0, 4) == [0, 0, 0, 0], split_cents(0, 4)\n'
+        'shares = split_cents(100, 7)\n'
+        'assert sum(shares) == 100, f"the parts sum to {sum(shares)}, not 100: {shares}"\n'
+        'assert max(shares) - min(shares) <= 1, shares\n'
+        'for bad in (0, -1):\n'
+        '    try:\n'
+        '        split_cents(10, bad)\n'
+        '    except ValueError:\n'
+        '        pass\n'
+        '    else:\n'
+        '        raise AssertionError(f"parts={bad} should raise ValueError")\n'
+        'print("ok")\n')
+    return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
+
+
 WINDOW_SUITE = '''import unittest
 
 from window import rolling_max
@@ -540,6 +575,15 @@ TASKS = [
          'see where you stand.',
          setup_sample_variance, check_sample_variance,
          note='specification is a test file in the sandbox'),
+    Task('split_cents',
+         'sandbox/split.py implements split_cents(total, parts), which divides an amount of '
+         'money in whole cents into that many parts. It is wrong. Every part must be a whole '
+         'number of cents, the parts must sum to total exactly, no two parts may differ by '
+         'more than one cent, and the extra cents go to the leftmost parts: split_cents(10, 3) '
+         'must be [4, 3, 3] and split_cents(3, 5) must be [1, 1, 1, 0, 0]. A parts value of '
+         'zero or less must raise ValueError. Fix split_cents.',
+         setup_split_cents, check_split_cents,
+         note='prose only; the obvious even split does not sum to the total'),
 ]
 
 CONFIGS = {

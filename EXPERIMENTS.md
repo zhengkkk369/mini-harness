@@ -94,24 +94,44 @@ keeps a refusal reading exactly as it did before this existed.
 
 ## 3. Event trace
 
-Twenty tool turns plus a final answer, with the trace off and on. Each tool turn
-emits `turn`, `usage`, `tool_call` and `tool_result`; the run adds `run_start`
-and `run_end`, so about 82 events.
+The same scripted run with the trace off and on, at two lengths: 20 tool turns
+(84 events) and 200 (804 events). Each tool turn emits `turn`, `usage`,
+`tool_call` and `tool_result`; the run adds `run_start` and `run_end`.
 
-| Trace | Median | Min | Max | Bytes written |
-| --- | ---: | ---: | ---: | ---: |
-| off | 103.44 ms | 92.09 ms | 160.08 ms | 0 |
-| on | 98.17 ms | 95.18 ms | 120.04 ms | 10,868 |
-| overhead | **-5.27 ms** | | | |
+| Trace | Turns | Events | Median | Min | Max | Bytes written |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| off | 20 | 0 | 213.30 ms | 176.74 ms | 285.70 ms | 0 |
+| on | 20 | 84 | 238.64 ms | 180.87 ms | 687.28 ms | 11,440 |
+| off | 200 | 0 | 2168.54 ms | 1457.16 ms | 3154.18 ms | 0 |
+| on | 200 | 804 | 2371.81 ms | 1473.22 ms | 3722.76 ms | 108,747 |
 
-**The overhead is now below this measurement's noise floor.** In this run the
-traced variant came out 5 ms *faster*, which is not a real effect: the spread
-between the fastest and slowest run of the same configuration (92 to 160 ms) is
-larger than the difference being measured. Earlier runs of the same experiment
-put the overhead at +9.2 ms, +13.2 ms and +14.8 ms. The honest summary is
-"somewhere between zero and about 15 ms for ~82 events, which is 0-15% of a run
-whose only work is tool calls" -- and that the measurement is not precise enough
-to say more without many more samples.
+Those medians are not the measurement. The two conditions are timed
+**alternately inside each repeat** and the paired difference is what gets a
+median, because timing one block and then the other measures the machine:
+
+| Turns | Events | Overhead (paired median) | Min pair | Max pair | Per event |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 84 | **+2.93 ms** | -36.06 ms | +408.98 ms | 34.9 us |
+| 200 | 804 | **+208.47 ms** | -41.57 ms | +1003.70 ms | 259.3 us |
+
+Reading it:
+
+- **At 84 events the cost is inside the noise**, as the earlier runs of this
+  experiment found from the other direction (+9.2, +13.2, +14.8, +6.2, -5.3 ms).
+  The paired spread (-36 to +409 ms) is wider than the effect.
+- **At 804 events it is no longer inside the noise**: +208 ms for ten times the
+  events, or about **0.26 ms per event**, which agrees with the 0.28-0.30 ms per
+  event that the block-timed version produced at the same size. Two methods, one
+  answer.
+- **Conclusion for a real run.** Tracing a 10,000-event session costs roughly
+  2.6 s of wall clock. Model latency is 10-90 s per request, so this is not a
+  reason to leave the trace off -- but it is also not free, and the earlier
+  version of this code was 20x worse per event.
+
+The paired design is not decoration. Block-timing the same 804-event run
+reported the trace as **-252 ms** -- faster with tracing on -- because the first
+block was still being written back to disk while the second was timed. That is
+the number this table exists to replace.
 
 ### This experiment found and fixed a real defect
 
@@ -304,11 +324,10 @@ executed. Both paths are covered in `tests/test_selector.py`.
   numbers stay contiguous (they are assigned under a lock) and result order
   always matches the order the model asked for, but the trace file is not
   byte-stable between runs.
-- **The 21-turn trace figure is small.** ~82 events is a short run; a long
-  session writes proportionally more, and flush-per-event cost scales with it.
-  It is also small enough that its cost sits at the noise floor of this
-  measurement, so treat the trace overhead as "under ~15 ms for 82 events"
-  rather than as a precise number.
+- **The trace cost is measured per event, with a wide spread.** The paired
+  median at 804 events is +208 ms, but individual pairs ranged from -42 ms to
+  +1004 ms, and the 84-event run is entirely inside that spread. Treat ~0.26 ms
+  per event as an order of magnitude, not a constant.
 - **Retrieval was measured on synthetic text.** Five planted facts per size,
   against filler that shares vocabulary with the queries. Real conversation
   queries are messier, and the useful message may share no rare token with them.

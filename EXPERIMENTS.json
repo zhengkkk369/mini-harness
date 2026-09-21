@@ -1,52 +1,52 @@
 {
   "python": "3.12.13",
   "platform": "win32",
-  "repeats": 7,
+  "repeats": 9,
   "parallel": [
     {
       "latency_ms": 0.0,
       "calls": 6,
       "serial": {
-        "median_ms": 64.82579998555593,
-        "min_ms": 51.630200003273785,
-        "max_ms": 161.33210001862608
+        "median_ms": 60.843000013846904,
+        "min_ms": 49.28400000790134,
+        "max_ms": 128.55389999458566
       },
       "parallel": {
-        "median_ms": 38.92349998932332,
-        "min_ms": 35.197699995478615,
-        "max_ms": 77.99489999888465
+        "median_ms": 39.13660001126118,
+        "min_ms": 28.90320000005886,
+        "max_ms": 61.46130000706762
       },
-      "speedup": 1.6654668774220611
+      "speedup": 1.554631725707903
     },
     {
       "latency_ms": 5.0,
       "calls": 6,
       "serial": {
-        "median_ms": 114.03209998388775,
-        "min_ms": 98.47550000995398,
-        "max_ms": 246.7577000206802
+        "median_ms": 155.34530000877567,
+        "min_ms": 95.76690001995303,
+        "max_ms": 296.87369999010116
       },
       "parallel": {
-        "median_ms": 33.01770001417026,
-        "min_ms": 31.411900010425597,
-        "max_ms": 40.54570000153035
+        "median_ms": 121.55410001287237,
+        "min_ms": 45.6185000075493,
+        "max_ms": 154.64900000370108
       },
-      "speedup": 3.4536657591215745
+      "speedup": 1.2779930910789918
     },
     {
       "latency_ms": 20.0,
       "calls": 6,
       "serial": {
-        "median_ms": 186.30889998166822,
-        "min_ms": 176.02419998729602,
-        "max_ms": 265.48709999769926
+        "median_ms": 177.4617000191938,
+        "min_ms": 169.310500001302,
+        "max_ms": 219.65210000053048
       },
       "parallel": {
-        "median_ms": 47.15929998201318,
-        "min_ms": 45.765799994114786,
-        "max_ms": 62.896399991586804
+        "median_ms": 66.2478000158444,
+        "min_ms": 46.16189998341724,
+        "max_ms": 147.5854000018444
       },
-      "speedup": 3.9506290392929384
+      "speedup": 2.678756124380742
     }
   ],
   "subagents": [
@@ -54,52 +54,91 @@
       "latency_ms": 20.0,
       "calls": 4,
       "serial": {
-        "median_ms": 83.25389999663457,
-        "min_ms": 82.23919998272322,
-        "max_ms": 86.63390000583604
+        "median_ms": 98.84609997970983,
+        "min_ms": 92.35930000431836,
+        "max_ms": 130.31609999598004
       },
       "parallel": {
-        "median_ms": 26.104799995664507,
-        "min_ms": 24.936400004662573,
-        "max_ms": 30.09119999478571
+        "median_ms": 27.039499982493,
+        "min_ms": 24.784799985354766,
+        "max_ms": 33.30039998400025
       },
-      "speedup": 3.189218075237558
+      "speedup": 3.6556186336178094
     },
     {
       "latency_ms": 100.0,
       "calls": 4,
       "serial": {
-        "median_ms": 404.72540000337176,
-        "min_ms": 403.1459999969229,
-        "max_ms": 501.07280001975596
+        "median_ms": 442.31980000040494,
+        "min_ms": 418.644299992593,
+        "max_ms": 540.7494999817573
       },
       "parallel": {
-        "median_ms": 105.6150000076741,
-        "min_ms": 104.19690000708215,
-        "max_ms": 261.6258999914862
+        "median_ms": 110.69219998898916,
+        "min_ms": 104.34349998831749,
+        "max_ms": 300.91339998762123
       },
-      "speedup": 3.8320825637832123
+      "speedup": 3.9959437073651407
     }
   ],
   "trace": [
     {
       "trace": "off",
-      "median_ms": 174.34299999149516,
-      "min_ms": 155.00140000949614,
-      "max_ms": 273.58920002006926,
+      "turns": 20,
+      "events": 0,
+      "median_ms": 213.3040000044275,
+      "min_ms": 176.73529998864979,
+      "max_ms": 285.70229999604635,
       "bytes": 0
     },
     {
       "trace": "on",
-      "median_ms": 168.78969999379478,
-      "min_ms": 149.54809998744167,
-      "max_ms": 192.0754000020679,
-      "bytes": 11471
+      "turns": 20,
+      "events": 84,
+      "median_ms": 238.63609999534674,
+      "min_ms": 180.87409998406656,
+      "max_ms": 687.2822000004817,
+      "bytes": 11440
     },
     {
       "trace": "overhead",
-      "delta_ms": -5.553299997700378,
-      "bytes": 11471
+      "turns": 20,
+      "events": 84,
+      "bytes": 11440,
+      "delta_ms": 2.929699985543266,
+      "min_delta_ms": -36.0627000045497,
+      "max_delta_ms": 408.97920000134036,
+      "pairs": 9,
+      "per_event_us": 34.87738078027697
+    },
+    {
+      "trace": "off",
+      "turns": 200,
+      "events": 0,
+      "median_ms": 2168.539200007217,
+      "min_ms": 1457.1611999999732,
+      "max_ms": 3154.1834000090603,
+      "bytes": 0
+    },
+    {
+      "trace": "on",
+      "turns": 200,
+      "events": 804,
+      "median_ms": 2371.806799987098,
+      "min_ms": 1473.2154000084847,
+      "max_ms": 3722.761899989564,
+      "bytes": 108747
+    },
+    {
+      "trace": "overhead",
+      "turns": 200,
+      "events": 804,
+      "bytes": 108747,
+      "delta_ms": 208.46760002314113,
+      "min_delta_ms": -41.57230001874268,
+      "max_delta_ms": 1003.7019000155851,
+      "pairs": 9,
+      "per_event_us": 259.28805973027505
     }
   ],
   "verify": [
@@ -135,7 +174,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 1.5567000082228333
+      "search_ms": 0.9782000270206481
     },
     {
       "distractors": 200,
@@ -143,7 +182,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 2.8466999938245863
+      "search_ms": 2.689399989321828
     },
     {
       "distractors": 800,
@@ -151,7 +190,7 @@
       "queries": 5,
       "top1": 5,
       "top3": 5,
-      "search_ms": 9.35790000949055
+      "search_ms": 6.1089000082574785
     }
   ],
   "vector": [
@@ -160,13 +199,13 @@
       "entries": 55,
       "archive_texts": 56,
       "archive_provider_calls": 2,
-      "cold_query_ms": 24.03739999863319,
+      "cold_query_ms": 18.446999980369583,
       "repeat_texts": 0,
       "repeat_provider_calls": 0,
-      "warm_query_ms": 7.886200008215383,
-      "lexical_ms": 1.4355999883264303,
-      "vector_ms": 5.949199985479936,
-      "hybrid_ms": 6.861000001663342,
+      "warm_query_ms": 4.2478000104893,
+      "lexical_ms": 1.3261999993119389,
+      "vector_ms": 4.952800023602322,
+      "hybrid_ms": 5.8234999887645245,
       "queries": 5,
       "top1_lexical": 5,
       "top1_vector": 4,
@@ -177,13 +216,13 @@
       "entries": 205,
       "archive_texts": 206,
       "archive_provider_calls": 4,
-      "cold_query_ms": 98.38609999860637,
+      "cold_query_ms": 65.36700000287965,
       "repeat_texts": 0,
       "repeat_provider_calls": 0,
-      "warm_query_ms": 20.571499975631014,
-      "lexical_ms": 2.8651999891735613,
-      "vector_ms": 23.011399985989556,
-      "hybrid_ms": 24.646799982292578,
+      "warm_query_ms": 14.178699988406152,
+      "lexical_ms": 2.536599989980459,
+      "vector_ms": 14.77170002181083,
+      "hybrid_ms": 16.809199994895607,
       "queries": 5,
       "top1_lexical": 5,
       "top1_vector": 3,
@@ -194,13 +233,13 @@
       "entries": 805,
       "archive_texts": 806,
       "archive_provider_calls": 10,
-      "cold_query_ms": 314.07360002049245,
+      "cold_query_ms": 413.53990000789054,
       "repeat_texts": 0,
       "repeat_provider_calls": 0,
-      "warm_query_ms": 76.78430000669323,
-      "lexical_ms": 8.909399999538437,
-      "vector_ms": 94.08740000799298,
-      "hybrid_ms": 101.21439999784343,
+      "warm_query_ms": 87.53809999325313,
+      "lexical_ms": 6.801200011977926,
+      "vector_ms": 62.49120002030395,
+      "hybrid_ms": 68.02739997510798,
       "queries": 5,
       "top1_lexical": 5,
       "top1_vector": 2,

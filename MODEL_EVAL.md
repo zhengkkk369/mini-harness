@@ -76,11 +76,11 @@ The count and the line count are both correct, so the whole path works: TUI
 event loop, JSON worker protocol, real tool execution, real model, streaming
 into the feed.
 
-## 2. Mini benchmark: 15 tasks, 4 configurations, 2 repeats
+## 2. Mini benchmark: 16 tasks, 4 configurations, 2 repeats
 
 `bench/mini_bench.py` — every task is stdlib-only and every check is an
 assertion run by the harness process, so a pass never depends on the model
-saying it passed. There are fifteen tasks: four state their contract only in
+saying it passed. There are sixteen tasks: four state their contract only in
 prose, three ship a runnable specification, and the rest ship a checker in the
 sandbox. Whether the code is ever run is entirely the model's choice.
 
@@ -182,7 +182,6 @@ not a solution — the rule the prompt states is enforced rather than trusted.
 | `rolling_window` | window count, a window as long as the input, a window longer than it, an empty input |
 | `round_half_up` | ties away from zero, both signs, and the same rule at one decimal place |
 | `sample_variance` | the sample (n-1) definition, one value, and an empty list |
-
 Thirty runs: three tasks, two configurations, five repeats.
 
 | config | passed | nudges | median turns | median tokens | total cost |
@@ -209,6 +208,43 @@ Three readings, and the second one is the point:
   p = 0.51, wall time p = 0.93, 20,000 permutations), and the medians point the
   other way. A single 26-turn run had produced the entire gap. Same tasks, same
   runner, more samples.
+
+### A task built to let the nudge matter
+
+The harder tier could not show the loop's benefit, because the specification was
+runnable and the model ran it. So one more task was written for the opposite
+shape: `split_cents`, whose contract is complete in prose — the parts must sum to
+the total exactly, differ by at most one cent, and the extra cents go to the
+leftmost parts — and whose obvious implementation, an even division, does not sum
+to the total. Nothing in the sandbox checks it.
+
+| config | passed | nudges | median turns | total tokens | cost |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 6/6 | 0 | 7 | 287,035 | $0.0102 |
+| `no_verify` | 6/6 | 0 | 7 | 263,081 | $0.0109 |
+
+The model reached for the remainder distribution on the first attempt in all
+twelve runs, so this experiment also measured the model rather than the loop.
+
+### What would be needed to show the loop's benefit
+
+Counting every run this repository has recorded:
+
+| runs | `verify_required` | shell available | nudges |
+| ---: | --- | --- | ---: |
+| 45 | on | yes | **0** |
+| 8 | on | no (denied by policy) | 8 — one per run |
+| 69 | off | yes | n/a |
+
+The nudge fires on the precondition "the run is about to stop with an edit it
+never ran anything after". This model does not stop that way when it can run
+code, on any task in the suite, including one written specifically so that an
+unverified first attempt would be wrong. The mechanism's benefit cannot be
+demonstrated by adding tasks here: it needs a model whose first attempt is
+actually wrong, or a task that hides its own failure from a careful reader. What
+*is* demonstrated, and what the tests pin down, is that the nudge fires when its
+precondition holds, fires exactly once, terminates the run, and reports the truth
+about `verified`.
 
 ### Cost, and why the cache rate matters
 
@@ -424,11 +460,12 @@ task instead of 500.
 
 ## Limitations
 
-- **Ceiling effect.** The mini suite is fifteen small tasks, and the model solved
-  71 of 72 runs of the first twelve and 30 of 30 runs of the harder tier. It
-  cannot rank configurations. Its value is that it exercises the harness end to
-  end against a real model and produces token, turn and trace data — and that its
-  one failure was informative.
+- **Ceiling effect.** The mini suite is sixteen small tasks, and the model solved
+  71 of 72 runs of the first twelve, 30 of 30 runs of the harder tier, and 12 of
+  12 of the task written to punish an unverified first attempt. It cannot rank
+  configurations. Its value is that it exercises the harness end to end against a
+  real model and produces token, turn and trace data — and that its one failure
+  was informative.
 - **Two repeats per cell is still few.** The turn and token differences between
   configurations should not be read as effects; only the mechanism counts
   (nudges, parallel batches) are structural rather than statistical. The harder
@@ -452,6 +489,13 @@ task instead of 500.
 - **The SWE-bench figure is a single task.** 0/1 is an anecdote that shows the
   pipeline works end to end; it is not a score and does not compare to the
   401/500 recorded in [BENCHMARKS.md](BENCHMARKS.md).
+- **The wall budget is checked between turns.** One `split_cents` run under a
+  240 s budget finished in 283 s and was stopped as `timeout`, with one tool call
+  tagged `execute_failed:TimeoutError` — a call that waited out its own timeout.
+  A turn's tokens are bounded by `max_tokens_main`, but its wall time is bounded
+  by the shell timeout, and the budget only looks again at the next turn
+  boundary. The run had already fixed the code, so it also shows that the
+  benchmark scores the artifact and not the outcome.
 - **Prices move, and peak is double off-peak.** The cost figures come from the
   provider's published rates on the day, at off-peak. Re-check them before
   quoting any of these numbers, and pass `--price-in`, `--price-out` and
@@ -468,14 +512,19 @@ uv run python -m bench.mini_bench --tasks rolling_window --tasks round_half_up \
     --tasks sample_variance --only baseline --only no_verify --repeats 5 \
     --out MINI_BENCH_HARD.json --price-in 0.15 --price-out 0.60 \
     --price-cache-in 0.003                        # the harder tier above
+uv run python -m bench.mini_bench --tasks split_cents --only baseline --only no_verify \
+    --repeats 6 --out MINI_BENCH_NUDGE.json --price-in 0.15 --price-out 0.60 \
+    --price-cache-in 0.003                        # the task built for the nudge
 ```
 
 The task definitions are also covered offline, without a model:
 `tests/test_mini_bench.py` checks that every task starts unsolved, that a
 reference fix passes its checker, that a weakened or deleted test suite is
-refused, and that every configuration override names a real config field.
+refused, that the obvious even split fails `split_cents`, and that every
+configuration override names a real config field.
 
 The raw results of the recorded runs are in [MINI_BENCH.json](MINI_BENCH.json)
 (the twelve-task suite), [MINI_BENCH_PRICED.json](MINI_BENCH_PRICED.json) (the
-priced `unverifiable` run) and [MINI_BENCH_HARD.json](MINI_BENCH_HARD.json) (the
-harder tier).
+priced `unverifiable` run), [MINI_BENCH_HARD.json](MINI_BENCH_HARD.json) (the
+harder tier) and [MINI_BENCH_NUDGE.json](MINI_BENCH_NUDGE.json) (the nudge
+task).

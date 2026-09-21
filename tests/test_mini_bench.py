@@ -110,17 +110,31 @@ REFERENCE = {
                         '        raise ValueError("at least two values are needed")\n'
                         '    mean = sum(values) / len(values)\n'
                         '    return sum((value - mean) ** 2 for value in values) / (len(values) - 1)\n'),
+    'split_cents': ('split.py',
+                    'def split_cents(total, parts):\n'
+                    '    """Divide an amount in whole cents into that many parts."""\n'
+                    '    if parts <= 0:\n'
+                    '        raise ValueError("parts must be positive")\n'
+                    '    base, extra = divmod(total, parts)\n'
+                    '    return [base + 1] * extra + [base] * (parts - extra)\n'),
 }
 
-HARD = [task for task in mini_bench.TASKS if task.name in REFERENCE]
+# These three ship their specification as a test file, so the checker also has
+# to refuse a weakened one. split_cents has no suite to weaken.
+SUITE_TASKS = ['rolling_window', 'round_half_up', 'sample_variance']
 
 
-def test_the_harder_tier_is_wired_up():
-    assert sorted(REFERENCE) == ['rolling_window', 'round_half_up', 'sample_variance']
-    assert {task.name for task in HARD} == set(REFERENCE)
+def tasks_in(names):
+    return [task for task in mini_bench.TASKS if task.name in names]
 
 
-@pytest.mark.parametrize('task', HARD, ids=lambda task: task.name)
+def test_the_tiers_are_wired_up():
+    assert sorted(REFERENCE) == ['rolling_window', 'round_half_up', 'sample_variance', 'split_cents']
+    assert set(SUITE_TASKS) < set(REFERENCE)
+    assert {task.name for task in tasks_in(REFERENCE)} == set(REFERENCE)
+
+
+@pytest.mark.parametrize('task', tasks_in(REFERENCE), ids=lambda task: task.name)
 def test_a_reference_solution_passes(task, tmp_path):
     """The checker accepts a correct fix, which is the one thing it must do."""
     sandbox = prepare(task, tmp_path)
@@ -132,7 +146,7 @@ def test_a_reference_solution_passes(task, tmp_path):
     assert ok is True, f'{task.name} rejects a correct fix: {detail}'
 
 
-@pytest.mark.parametrize('task', HARD, ids=lambda task: task.name)
+@pytest.mark.parametrize('task', tasks_in(SUITE_TASKS), ids=lambda task: task.name)
 def test_the_specification_suite_cannot_be_weakened(task, tmp_path):
     """Gutting the test is not a solution, even when the code is fixed."""
     sandbox = prepare(task, tmp_path)
@@ -148,7 +162,7 @@ def test_the_specification_suite_cannot_be_weakened(task, tmp_path):
     assert 'modified' in detail
 
 
-@pytest.mark.parametrize('task', HARD, ids=lambda task: task.name)
+@pytest.mark.parametrize('task', tasks_in(SUITE_TASKS), ids=lambda task: task.name)
 def test_a_deleted_specification_suite_is_not_a_pass(task, tmp_path):
     sandbox = prepare(task, tmp_path)
     name, body = REFERENCE[task.name]
@@ -159,6 +173,34 @@ def test_a_deleted_specification_suite_is_not_a_pass(task, tmp_path):
 
     assert ok is False
     assert 'deleted' in detail
+
+
+def test_the_specification_tasks_are_the_ones_that_ship_a_suite(tmp_path):
+    """The note and the sandbox have to agree about which tier a task is in."""
+    for task in mini_bench.TASKS:
+        sandbox = prepare(task, tmp_path / task.name)
+        suites = sorted(path.name for path in sandbox.glob('test_*.py'))
+        if task.name in SUITE_TASKS:
+            assert len(suites) == 1, f'{task.name}: {suites}'
+            assert 'test file in the sandbox' in task.note, task.name
+        else:
+            assert not suites, f'{task.name} ships {suites}'
+            assert 'test file in the sandbox' not in task.note, task.name
+
+
+def test_the_split_task_rejects_the_obvious_even_split(tmp_path):
+    """The whole point of the task: the naive implementation must fail it."""
+    task = tasks_in(['split_cents'])[0]
+    sandbox = prepare(task, tmp_path)
+    (sandbox / 'split.py').write_text(
+        'def split_cents(total, parts):\n'
+        '    """Divide evenly."""\n'
+        '    return [total // parts] * parts\n', encoding='utf-8')
+
+    ok, detail = task.check(sandbox, '')
+
+    assert ok is False
+    assert '[3, 3, 3]' in detail, detail
 
 
 def test_the_reference_suites_import_from_the_sandbox_root():
