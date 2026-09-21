@@ -47,6 +47,11 @@ jobs:
           uv run --locked python -m compileall -q src tests bench
       - name: Run the offline test suite
         run: uv run --locked pytest
+      # One line per test file, plus the total, so a platform that collects a
+      # different set is visible in the log instead of only in a count. -o
+      # addopts= clears the configured -q, which would suppress the listing.
+      - name: Record what the suite collected
+        run: uv run --locked pytest -o addopts= --collect-only -q
       - name: Check imports, tool schemas, and CLI offline
         run: |
           uv run --locked python -c "from mini_harness.agent import DeepSeekAgent; from mini_harness.tool.box import TOOLS; assert len(DeepSeekAgent(TOOLS).tools) == 11"
