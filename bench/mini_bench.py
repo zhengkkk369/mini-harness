@@ -309,6 +309,152 @@ def check_id_sort(sandbox: Path, answer: str):
     return (code == 0 and out.endswith('ok')), f'exit={code} out={tail(out)!r}'
 
 
+# --------------------------------------------------------------------------- the harder tier
+#
+# These three ship the specification as a test file inside the sandbox. The
+# contract is therefore never ambiguous -- it is written down and runnable -- but
+# the prompt does not restate it, so a run has to go and read it, and the
+# behaviour is only confirmed by running something. That is the shape a task
+# needs if turning verification on is ever going to change the outcome.
+#
+# The check refuses a modified suite: weakening the test is not a solution. That
+# is the same rule the system prompt states, enforced here rather than trusted.
+
+def check_test_suite(sandbox: Path, body: str, name: str):
+    """Pass only if the shipped suite is intact and green."""
+    path = sandbox / name
+    if not path.exists():
+        return False, f'{name} was deleted; it is the specification'
+    if path.read_text(encoding='utf-8') != body:
+        return False, f'{name} was modified; it is the specification'
+    code, out = run_file(sandbox, name)
+    return code == 0, f'exit={code} out={tail(out)!r}'
+
+
+WINDOW_SUITE = '''import unittest
+
+from window import rolling_max
+
+
+class RollingMax(unittest.TestCase):
+    def test_the_stated_example(self):
+        self.assertEqual(rolling_max([1, 3, 2, 5, 4], 2), [3, 3, 5, 5])
+
+    def test_windows_of_one(self):
+        self.assertEqual(rolling_max([4, 1, 7], 1), [4, 1, 7])
+
+    def test_one_window_covering_everything(self):
+        self.assertEqual(rolling_max([2, 9, 3], 3), [9])
+
+    def test_a_window_longer_than_the_input(self):
+        self.assertEqual(rolling_max([2, 9, 3], 5), [])
+
+    def test_an_empty_input(self):
+        self.assertEqual(rolling_max([], 2), [])
+
+
+if __name__ == '__main__':
+    unittest.main()
+'''
+
+
+def setup_rolling_window(sandbox: Path) -> None:
+    write(sandbox, 'window.py',
+          'def rolling_max(values, k):\n'
+          '    """The maximum of every window of size k."""\n'
+          '    return [max(values[i:i + k]) for i in range(len(values))]\n')
+    write(sandbox, 'test_window.py', WINDOW_SUITE)
+
+
+def check_rolling_window(sandbox: Path, answer: str):
+    return check_test_suite(sandbox, WINDOW_SUITE, 'test_window.py')
+
+
+ROUNDING_SUITE = '''import unittest
+
+from rounding import round_half_up
+
+
+class RoundHalfUp(unittest.TestCase):
+    def test_half_goes_up(self):
+        self.assertEqual(round_half_up(2.5), 3)
+
+    def test_a_negative_half_goes_away_from_zero(self):
+        self.assertEqual(round_half_up(-2.5), -3)
+
+    def test_zero_point_five(self):
+        self.assertEqual(round_half_up(0.5), 1)
+
+    def test_below_the_half_stays_down(self):
+        self.assertEqual(round_half_up(2.4), 2)
+
+    def test_places_round_the_same_way(self):
+        self.assertAlmostEqual(round_half_up(1.25, 1), 1.3)
+        self.assertAlmostEqual(round_half_up(-1.25, 1), -1.3)
+
+    def test_places_below_the_half_stay_down(self):
+        self.assertAlmostEqual(round_half_up(1.24, 1), 1.2)
+
+
+if __name__ == '__main__':
+    unittest.main()
+'''
+
+
+def setup_round_half_up(sandbox: Path) -> None:
+    write(sandbox, 'rounding.py',
+          'def round_half_up(value, places=0):\n'
+          '    """Round to the nearest value, at the given number of places."""\n'
+          '    return round(value, places)\n')
+    write(sandbox, 'test_rounding.py', ROUNDING_SUITE)
+
+
+def check_round_half_up(sandbox: Path, answer: str):
+    return check_test_suite(sandbox, ROUNDING_SUITE, 'test_rounding.py')
+
+
+VARIANCE_SUITE = '''import unittest
+
+from spread import variance
+
+
+class Variance(unittest.TestCase):
+    def test_two_values(self):
+        self.assertAlmostEqual(variance([1, 3]), 2.0)
+
+    def test_three_values(self):
+        self.assertAlmostEqual(variance([2, 4, 6]), 4.0)
+
+    def test_a_constant_list(self):
+        self.assertAlmostEqual(variance([5, 5, 5]), 0.0)
+
+    def test_a_single_value_has_no_spread(self):
+        with self.assertRaises(ValueError):
+            variance([7])
+
+    def test_an_empty_list_has_no_spread(self):
+        with self.assertRaises(ValueError):
+            variance([])
+
+
+if __name__ == '__main__':
+    unittest.main()
+'''
+
+
+def setup_sample_variance(sandbox: Path) -> None:
+    write(sandbox, 'spread.py',
+          'def variance(values):\n'
+          '    """The spread of the values."""\n'
+          '    mean = sum(values) / len(values)\n'
+          '    return sum((value - mean) ** 2 for value in values) / len(values)\n')
+    write(sandbox, 'test_spread.py', VARIANCE_SUITE)
+
+
+def check_sample_variance(sandbox: Path, answer: str):
+    return check_test_suite(sandbox, VARIANCE_SUITE, 'test_spread.py')
+
+
 TASKS = [
     Task('fix_syntax',
          'sandbox/report.py does not even run because of a syntax error on the `total` '
@@ -370,6 +516,30 @@ TASKS = [
          'not all digits, sort the whole list lexically instead. An empty list stays empty.',
          setup_id_sort, check_id_sort,
          note='contract in prose only; no checker in the sandbox'),
+    # The harder tier: the specification is a runnable test file in the sandbox.
+    # The prompt says where it is and forbids editing it, and deliberately does
+    # not restate the cases, so getting it right means reading and running it.
+    Task('rolling_window',
+         'sandbox/window.py implements rolling_max(values, k), the maximum of every '
+         'consecutive window of size k. It is wrong. sandbox/test_window.py is the '
+         'specification of what it should do: make that suite pass by changing window.py '
+         'only, and do not edit the test file. Run it to see where you stand.',
+         setup_rolling_window, check_rolling_window,
+         note='specification is a test file in the sandbox'),
+    Task('round_half_up',
+         'sandbox/rounding.py implements round_half_up(value, places), and it does not round '
+         'the way its caller needs. sandbox/test_rounding.py is the specification: make that '
+         'suite pass by changing rounding.py only, and do not edit the test file. Run it to '
+         'see where you stand.',
+         setup_round_half_up, check_round_half_up,
+         note='specification is a test file in the sandbox'),
+    Task('sample_variance',
+         'sandbox/spread.py implements variance(values), and its definition of spread is not '
+         'the one its caller needs. sandbox/test_spread.py is the specification: make that '
+         'suite pass by changing spread.py only, and do not edit the test file. Run it to '
+         'see where you stand.',
+         setup_sample_variance, check_sample_variance,
+         note='specification is a test file in the sandbox'),
 ]
 
 CONFIGS = {

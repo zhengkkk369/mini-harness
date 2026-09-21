@@ -76,13 +76,13 @@ The count and the line count are both correct, so the whole path works: TUI
 event loop, JSON worker protocol, real tool execution, real model, streaming
 into the feed.
 
-## 2. Mini benchmark: 12 tasks, 4 configurations, 2 repeats
+## 2. Mini benchmark: 15 tasks, 4 configurations, 2 repeats
 
 `bench/mini_bench.py` — every task is stdlib-only and every check is an
 assertion run by the harness process, so a pass never depends on the model
-saying it passed. There are twelve tasks now, and four of them state their
-contract only in prose and ship no checker in the sandbox, so whether the code is
-ever run is entirely the model's choice.
+saying it passed. There are fifteen tasks: four state their contract only in
+prose, three ship a runnable specification, and the rest ship a checker in the
+sandbox. Whether the code is ever run is entirely the model's choice.
 
 | config | what changes |
 | --- | --- |
@@ -91,7 +91,7 @@ ever run is entirely the model's choice.
 | `serial_tools` | `parallel_tools=False` |
 | `unverifiable` | `run_bash` and `run_sandbox` denied, so the nudge cannot be satisfied |
 
-### Aggregate over 72 runs
+### Aggregate over 72 runs of the first twelve tasks
 
 | config | passed | rate | nudges | total tokens |
 | --- | ---: | ---: | ---: | ---: |
@@ -166,6 +166,49 @@ the change. The failure above is a case in point: `verified` was true there
 because nothing had been edited at all, and the criterion would not have objected
 even if something had, since a command that proves nothing satisfies it just as
 well as one that proves the fix.
+
+### A harder tier, and the outlier that repeats removed
+
+The ceiling was the next thing to attack. If the model solves every task, turning
+a mechanism on and off cannot change the outcome, so three tasks were added whose
+specification is a **runnable test file inside the sandbox**. The prompt says
+where the file is and forbids editing it, and deliberately does not restate the
+cases, so getting it right means going to read it and running it. The harness
+check refuses a modified suite as well as a failing one, so weakening the test is
+not a solution — the rule the prompt states is enforced rather than trusted.
+
+| task | what the shipped suite pins down |
+| --- | --- |
+| `rolling_window` | window count, a window as long as the input, a window longer than it, an empty input |
+| `round_half_up` | ties away from zero, both signs, and the same rule at one decimal place |
+| `sample_variance` | the sample (n-1) definition, one value, and an empty list |
+
+Thirty runs: three tasks, two configurations, five repeats.
+
+| config | passed | nudges | median turns | median tokens | total cost |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 15/15 | **0** | 9 | 50,212 | $0.0343 |
+| `no_verify` | 15/15 | **0** | 8 | 43,858 | $0.0404 |
+
+Three readings, and the second one is the point:
+
+- **The harder tier did not lift the ceiling.** These tasks are harder to *read*
+  — nothing in the prompt says what the expected values are — but not harder for
+  this model, which finds `test_*.py`, runs it, and fixes the code. The ceiling is
+  a property of small tasks and a capable model, not of task wording.
+- **The nudge never fired: 0 times in 30 runs with `verify_required` on.** Its
+  precondition is "the run is about to stop with unverified edits", and a model
+  that runs the shipped suite after editing never satisfies it. Adding tasks
+  cannot show the mechanism's benefit; on this evidence the only way to observe
+  it is to remove the ability to verify at all, which is what the `unverifiable`
+  configuration does — and there its remedy is unavailable by construction.
+- **Repeats changed the answer, which is the reason for them.** The same tier at
+  two repeats suggested `no_verify` cost 3.5x the tokens (882,901 against
+  253,141) and looked like a real effect. At five repeats it is gone: the mean
+  difference is +11,921 tokens with a two-sided permutation p = 0.77 (turns
+  p = 0.51, wall time p = 0.93, 20,000 permutations), and the medians point the
+  other way. A single 26-turn run had produced the entire gap. Same tasks, same
+  runner, more samples.
 
 ### Cost, and why the cache rate matters
 
@@ -381,20 +424,25 @@ task instead of 500.
 
 ## Limitations
 
-- **Ceiling effect.** The mini suite is twelve small tasks and the model solved
-  71 of 72 runs. It cannot rank configurations. Its value is that it exercises
-  the harness end to end against a real model and produces token, turn and trace
-  data — and that its one failure was informative.
+- **Ceiling effect.** The mini suite is fifteen small tasks, and the model solved
+  71 of 72 runs of the first twelve and 30 of 30 runs of the harder tier. It
+  cannot rank configurations. Its value is that it exercises the harness end to
+  end against a real model and produces token, turn and trace data — and that its
+  one failure was informative.
 - **Two repeats per cell is still few.** The turn and token differences between
   configurations should not be read as effects; only the mechanism counts
-  (nudges, parallel batches) are structural rather than statistical.
+  (nudges, parallel batches) are structural rather than statistical. The harder
+  tier above shows what more repeats do to a difference that two repeats
+  suggested was large. The other configurations remain at two.
 - **The ambiguity lesson.** One task was underspecified and the model asked
   instead of guessing, which in an unattended run scores as a failure. Any task
   whose stated examples do not pin down the expected behaviour will produce
   these, and they are the task author's defect.
 - **The verification loop's benefit is unmeasured.** It fires only when a run
-  stops unverified, which this model does not do on these tasks. What is measured
-  is that it fires when it must, that it is bounded, and that it does not lie.
+  stops unverified, which this model does not do on a task whose specification
+  it can run — 0 nudges in 30 harder-tier runs with the mechanism on. What is
+  measured is that it fires when it must, that it is bounded, and that it does
+  not lie.
 - **The TUI run is one prompt**, driven through a test pilot rather than a real
   keyboard. Approval modals, session switching and cancellation were not driven.
 - **Task choice is mine.** These are the tasks I wrote; they are not a
@@ -416,7 +464,18 @@ uv run python -m bench.mini_bench                 # default configs, writes MINI
 uv run python -m bench.mini_bench --repeats 2     # repeat every cell
 uv run python -m bench.mini_bench --only unverifiable --price-in 0.15 \
     --price-out 0.60 --price-cache-in 0.003       # the priced run above
+uv run python -m bench.mini_bench --tasks rolling_window --tasks round_half_up \
+    --tasks sample_variance --only baseline --only no_verify --repeats 5 \
+    --out MINI_BENCH_HARD.json --price-in 0.15 --price-out 0.60 \
+    --price-cache-in 0.003                        # the harder tier above
 ```
 
+The task definitions are also covered offline, without a model:
+`tests/test_mini_bench.py` checks that every task starts unsolved, that a
+reference fix passes its checker, that a weakened or deleted test suite is
+refused, and that every configuration override names a real config field.
+
 The raw results of the recorded runs are in [MINI_BENCH.json](MINI_BENCH.json)
-and [MINI_BENCH_PRICED.json](MINI_BENCH_PRICED.json).
+(the twelve-task suite), [MINI_BENCH_PRICED.json](MINI_BENCH_PRICED.json) (the
+priced `unverifiable` run) and [MINI_BENCH_HARD.json](MINI_BENCH_HARD.json) (the
+harder tier).

@@ -17,11 +17,11 @@
 - **Small, but complete.** About 3,100 lines of Python across 20 modules: eleven
   tools, context compaction, request retries, streaming responses, and session
   memory.
-- **Tested offline.** `uv run pytest` runs 554 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 583 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the tools, context compaction, retrievable memory, tool exposure,
   embedding backends, MCP bridging, configuration, the sandbox command builder,
-  and the TUI's worker protocol.
+  the benchmark's own tasks, and the TUI's worker protocol.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
   The definition contract is enforced in code, not just written in the prompt,
@@ -496,6 +496,7 @@ uv run --locked pytest
 | `tests/test_selector.py` | the exposure budget, the ranking, `find_tools`, and the refusal of a hidden call |
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
 | `tests/test_history.py` | repairing a stored conversation so the API accepts it |
+| `tests/test_mini_bench.py` | that every benchmark task starts unsolved, that a reference fix passes, and that a weakened test suite is refused |
 | `tests/test_tui.py` | the TUI worker protocol, driven as a real subprocess in demo mode |
 
 For measurements rather than pass/fail, see [EXPERIMENTS.md](EXPERIMENTS.md) and
@@ -520,7 +521,7 @@ questions:
 
 ```sh
 uv run python -m bench.experiments     # offline, scripted client, no API key
-uv run python -m bench.mini_bench      # real model, 12 tasks x 4 configurations
+uv run python -m bench.mini_bench      # real model, 15 tasks x 4 configurations
 uv run python -m bench.tui_run         # drive the TUI headlessly (needs textual)
 ```
 
