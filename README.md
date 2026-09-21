@@ -17,11 +17,12 @@
 - **Small, but complete.** About 3,100 lines of Python across 20 modules: eleven
   tools, context compaction, request retries, streaming responses, and session
   memory.
-- **Tested offline.** `uv run pytest` runs 583 tests with no network, no API key
+- **Tested offline.** `uv run pytest` runs 587 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the tools, context compaction, retrievable memory, tool exposure,
   embedding backends, MCP bridging, configuration, the sandbox command builder,
-  the benchmark's own tasks, and the TUI's worker protocol.
+  the benchmark's own tasks, and the TUI's worker protocol. A further 13 checks
+  drive a real Docker engine when one is running.
 - **Tools defined with Pydantic.** Typed inputs, generated JSON Schema, and
   validation before execution make tools easier to compose and orchestrate.
   The definition contract is enforced in code, not just written in the prompt,
@@ -462,6 +463,17 @@ there persist. For example, `{"command": "python hello.py"}` runs
 `sandbox/hello.py`. No host environment variables are forwarded into the container.
 The host `run_bash` tool remains available and is not isolated.
 
+Those claims were checked against a real engine rather than only asserted on the
+command line (`tests/test_sandbox_live.py`, which skips itself when Docker or the
+image is missing): a script's output comes back from the container's own
+interpreter, writes under `/workspace` land in the host `sandbox/`, a file beside
+`sandbox/` is not visible from inside, the root filesystem refuses a write,
+`/tmp` accepts one, `socket.create_connection` cannot reach the network, a 512 MB
+allocation does not survive the 256 MB cap — the kernel kills the container
+(exit 137, "Killed") rather than Python raising `MemoryError` — a non-zero exit
+is an error, an overrunning command is stopped by its timeout, and no container
+survives the call, successful or not.
+
 For the plain terminal interface:
 
 ```sh
@@ -471,10 +483,13 @@ uv run --locked mini-harness
 ## Tests
 
 The suite is fully offline: it uses a dummy API key and fake model clients, so
-it runs in CI and on a laptop without credentials. No test requires Docker.
+it runs in CI and on a laptop without credentials. No test requires Docker:
+`tests/test_sandbox_live.py` is the one file that talks to an engine, and it
+skips itself unless Docker is running and `python:3.12-slim` is already pulled.
 
 ```sh
 uv run --locked pytest
+uv run --locked pytest tests/test_sandbox_live.py   # the live sandbox checks, if Docker is up
 ```
 
 | File | Covers |
@@ -486,6 +501,7 @@ uv run --locked pytest
 | `tests/test_compact.py` | cut-point selection, the summary prompt, and the compaction audit log |
 | `tests/test_config.py` | provider inference, environment overrides, and the bench profile |
 | `tests/test_sandbox.py` | the Docker command line, isolation flags, mount scope, and cleanup |
+| `tests/test_sandbox_live.py` | the same claims against a real engine: mount mapping, host write-back, read-only root, no network, the memory cap, timeouts, cleanup (skips without Docker or the image) |
 | `tests/test_budget.py` | token, cost and wall-clock arithmetic and the stop decision |
 | `tests/test_trace.py` | the JSONL event log, flushing and failure handling |
 | `tests/test_contract.py` | the tool-definition and registry contracts |
