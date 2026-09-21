@@ -14,10 +14,20 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        # Windows is not decoration: the portability defects this repository has
+        # collected -- a POSIX-only os.getuid() call, a pipe decoded with the
+        # machine's locale codec, npx.CMD not being spawnable by name, a log
+        # directory hardcoded to /logs/agent -- were all invisible to a Linux-only
+        # matrix. One Windows entry is enough to keep them from coming back.
+        os: [ubuntu-latest]
         python-version: ["3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.12"
     env:
       DEEPSEEK_API_KEY: ci-dummy-not-a-real-key
       PYTHON_DOTENV_DISABLED: "1"
@@ -41,7 +51,12 @@ jobs:
         run: |
           uv run --locked python -c "from mini_harness.agent import DeepSeekAgent; from mini_harness.tool.box import TOOLS; assert len(DeepSeekAgent(TOOLS).tools) == 11"
           uv run --locked mini-harness --help
-          MINI_HARNESS_PROFILE=bench uv run --locked mini-harness --help
+      # A separate step, because `VAR=value command` is not what every shell on
+      # the matrix does; the environment is the portable way to say it.
+      - name: Check the bench profile starts
+        env:
+          MINI_HARNESS_PROFILE: bench
+        run: uv run --locked mini-harness --help
       - name: Check TUI entry point offline
         run: uv run --script tui.py --help
       - name: Build package
