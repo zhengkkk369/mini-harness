@@ -520,11 +520,11 @@ def test_quiet_tools_silences_the_console_copy(cfg_factory, capsys):
 # --------------------------------------------------------------------- registry wiring
 
 def test_default_registry_exposes_every_built_in_tool():
-    assert len(box.TOOLS) == 11
+    assert len(box.TOOLS) == 12
     assert {t.name for t in box.TOOLS} == {
         "glob_file", "grep_file", "read_file", "write_file", "edit_file",
         "run_bash", "run_sandbox", "run_todo", "recall", "find_tools",
-        "run_subagent",
+        "skills", "run_subagent",
     }
 
 
@@ -534,7 +534,7 @@ def test_only_shell_and_subagent_tools_are_risky():
 
 def test_tool_schemas_are_exportable_json():
     api_tools = box._to_api_tool(box.TOOLS)
-    assert len(api_tools) == 11
+    assert len(api_tools) == 12
     for entry in api_tools:
         assert entry["type"] == "function"
         assert entry["function"]["parameters"]["type"] == "object"

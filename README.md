@@ -14,9 +14,9 @@
 
 ## Why mini-harness?
 
-- **Small, but complete.** About 3,100 lines of Python across 20 modules: eleven
-  tools, context compaction, request retries, streaming responses, and session
-  memory.
+- **Small, but complete.** About 3,300 lines of Python across 21 modules: twelve
+  tools, context compaction, skills, request retries, streaming responses, and
+  session memory.
 - **Tested offline.** `uv run pytest` runs 640 tests with no network, no API key
   and no Docker. They cover the agent loop, the tool executor's file-state
   gates, the tools, context compaction, retrievable memory, tool exposure,
@@ -464,6 +464,49 @@ The budget is off by default, and deliberately conservative when on: the ranking
 is lexical, so a task whose wording does not resemble a tool description is
 exactly where a cap would hurt. The `bench` profile pins it to `0`.
 
+## Skills
+
+Some work has a procedure: how this project wants a change verified, what a
+release check involves, which files a migration must touch. Writing that into the
+system prompt pays for it on every request; leaving it out means the agent
+rediscovers it every time.
+
+A **skill** is a Markdown file under `<workspace>/skills/`, so its *description*
+rides in the prompt and its *body* is loaded when the agent asks for it:
+
+```markdown
+---
+name: verify-a-change
+description: Run the tests that cover an edit, then report what they proved
+tools: read_file, run_bash
+---
+
+1. Find the test file that covers the change.
+2. Run it, and read the failure rather than assuming the cause.
+3. Report what the run proved, and what it did not cover.
+```
+
+```sh
+export MINI_HARNESS_SKILLS_DIR=./team-skills   # default: <workspace>/skills
+export MINI_HARNESS_SKILLS=false               # turn the whole layer off
+```
+
+- The prompt carries one line per skill (name and description), capped at 2,000
+  characters, so a directory of skills cannot quietly grow the prompt.
+- `skills(action="load", name=...)` returns the body as the tool result and
+  **pins the tools the skill names**, so a procedure that needs a tool the
+  exposure budget trimmed can still run.
+- **A skill grants nothing.** It is text: a skill naming `run_bash` still gets
+  the approval prompt, and one naming a tool that does not exist says so instead
+  of failing later. This is why there is no separate permission model for skills.
+- A file without a description is skipped and reported by `skills(action="list")`
+  rather than loaded anonymously — the description is the only thing the agent
+  sees before loading.
+- The `bench` profile pins skills off, because a workspace skill directory would
+  otherwise change the prompt a recorded score was produced with.
+- [`skills/verify-a-change/SKILL.md`](skills/verify-a-change/SKILL.md) is the
+  worked example, and it is this repository's own verification procedure.
+
 ## Get started
 
 ### 1. Download and install
@@ -577,6 +620,7 @@ gh workflow run CI
 | `tests/test_memory.py` | journal indexing, lexical ranking, and the recall tool |
 | `tests/test_embed.py` | the embedders, the cache, rank fusion, and the lexical fallback |
 | `tests/test_selector.py` | the exposure budget, the ranking, `find_tools`, and the refusal of a hidden call |
+| `tests/test_skills.py` | skill parsing, the prompt index, loading, tool pinning, and that a skill grants no permission |
 | `tests/test_mcp.py` | handshake, tool discovery, dispatch, timeouts and failure handling |
 | `tests/test_history.py` | repairing a stored conversation so the API accepts it |
 | `tests/test_mini_bench.py` | that every benchmark task starts unsolved, that a reference fix passes, and that a weakened test suite is refused |

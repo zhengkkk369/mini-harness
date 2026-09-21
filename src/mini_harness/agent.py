@@ -14,14 +14,16 @@ from mini_harness.compact import COMPACT
 from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, log_tool, WRITE_TOOLS
 from mini_harness.history import atomic_write
 from mini_harness.selector import SELECTION, select
+from mini_harness.skills import load as load_skills
 from mini_harness.tool.tag import OUTCOME, MARK
 from mini_harness.tool.block import CLIP
 
-# Always exposed, whatever the budget: the escape hatch itself, plus the tools
-# the locate/understand workflow starts from. Everything else -- the write, shell
-# and delegation tools, and anything bridged in from MCP -- has to earn its place
-# or be pulled back in by find_tools.
-CORE_TOOLS = frozenset({'find_tools', 'read_file', 'grep_file', 'glob_file'})
+# Always exposed, whatever the budget: the escape hatch itself, the tools the
+# locate/understand workflow starts from, and the one the skills index in the
+# prompt tells the agent to call. Everything else -- the write, shell and
+# delegation tools, and anything bridged in from MCP -- has to earn its place or
+# be pulled back in by find_tools.
+CORE_TOOLS = frozenset({'find_tools', 'read_file', 'grep_file', 'glob_file', 'skills'})
 
 VERIFY_TOOLS = {'run_bash', 'run_sandbox'}
 VERIFY_NUDGE = (
@@ -61,10 +63,11 @@ class DeepSeekAgent:
         self._exposed = tuple(t.name for t in tools)
         self.last_prompt_tokens = 0
         self.printed = ''
+        self.skills = load_skills(cfg.skills_path, enabled = cfg.skills_enabled)
         self.system = [
             {
                 'role': 'system',
-                'content': cfg.system_prompt
+                'content': cfg.system_prompt + self._skills_block()
             }
         ]
         self.message = list(self.system)
@@ -72,6 +75,24 @@ class DeepSeekAgent:
         self.last_usage = None
         self.last_reasoning = ''
         return
+
+    def _skills_block(self) -> str:
+        """The skills index, appended to the system prompt.
+
+        Names and descriptions only: enough for the agent to know what exists,
+        without paying for the procedures whether or not they are used. An empty
+        directory, or skills turned off, appends nothing at all.
+        """
+        index = self.skills.index_text()
+        if not index:
+            return ''
+        return (
+            '\n\n--- Skills ---\n\n'
+            'Written procedures for kinds of work in this workspace. The name and description\n'
+            'are here; call skills(action="load", name=...) to read the steps before starting\n'
+            'that kind of task.\n\n'
+            f'{index}\n'
+        )
 
     def _expose(self, cfg = CONFIG) -> list:
         """The tool list for the next request, honouring the exposure budget.

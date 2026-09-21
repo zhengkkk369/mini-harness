@@ -312,7 +312,7 @@ def test_a_visible_tool_is_unaffected_by_the_hidden_set(cfg):
 
 
 def test_the_built_in_catalogue_starts_with_only_the_core_tools_exposed(cfg):
-    assert CORE_TOOLS == {"find_tools", "read_file", "grep_file", "glob_file"}
+    assert CORE_TOOLS == {"find_tools", "read_file", "grep_file", "glob_file", "skills"}
 
 
 def test_an_agent_without_a_budget_exposes_every_tool(cfg):
@@ -358,5 +358,8 @@ def test_a_run_refuses_a_hidden_tool_and_points_at_find_tools(cfg_factory):
 
     assert result.outcome == OUTCOME.COMPLETED
     assert result.failed_by_tag == {TAG.HIDDEN_TOOL: 1}
-    assert len(client.stream_calls[0]["tools"]) == 4
+    # A budget below the core set exposes the core set: the pinned tools are the
+    # floor, so asking for four gives the five that are never hidden.
+    assert len(client.stream_calls[0]["tools"]) == len(CORE_TOOLS)
+    assert "run_bash" not in {entry["function"]["name"] for entry in client.stream_calls[0]["tools"]}
     assert any("find_tools" in str(message.get("content", "")) for message in agent.message)

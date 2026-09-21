@@ -130,6 +130,7 @@ O2. run_subagent is available (explore_agent, coding_agent, planning_agent). Use
 #   recall_enabled   the run would carry an eleventh tool and an extra prompt line
 #   tool_budget      a non-zero cap would hide tools and shorten the prompt
 #   mcp_servers      an attached server would add tools the recorded run lacked
+#   skills_enabled   a skills directory would add a prompt section and a tool
 #
 # They stay available; a run that wants them can set them through the
 # environment. Anything not listed here keeps its default, and the tool set
@@ -151,5 +152,6 @@ BENCH_OVERRIDE: dict = {
     'recall_enabled': False,
     'tool_budget': 0,
     'mcp_servers': (),
+    'skills_enabled': False,
     'system_prompt': BENCH_PROMPT
 }

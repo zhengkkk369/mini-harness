@@ -14,7 +14,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Callable, Annotated
+from typing import Callable, Annotated, Literal
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, StringConstraints, field_validator, model_validator
 from enum import Enum
 from openai import OpenAI
@@ -23,6 +23,7 @@ from mini_harness.config import CONFIG
 from mini_harness.budget import ACCOUNT, SOURCE_SUBAGENT
 from mini_harness.embed import build_embedder
 from mini_harness.history import atomic_write as _atomic_write
+from mini_harness.skills import load as load_skills
 from mini_harness.memory import Memory, journal_path
 from mini_harness.policy import Policy, DENY
 from mini_harness.selector import SELECTION, rank_definitions
@@ -688,6 +689,53 @@ def find_tools(inp: FindToolsInput, cfg = CONFIG) -> str:
     lines.extend(f'\n- {definition.name}: {definition.description}' for definition in picked)
     return '\n'.join(lines)
 
+class SkillsInput(BaseModel):
+    model_config = ConfigDict(extra = 'forbid')
+    action: Literal['list', 'load'] = Field('list', description = "'list' shows every skill with its description; 'load' brings one into the conversation")
+    name: str = Field('', description = "the skill to load; required when action is 'load'")
+
+def skills(inp: SkillsInput, cfg = CONFIG) -> str:
+    """Show or load a skill.
+
+    Loading returns the procedure as the tool result -- the model asked for it,
+    so it arrives where it asked -- and pins the tools the skill names, so a
+    procedure that needs a tool the exposure budget trimmed can still run. It
+    grants nothing: a risky tool still asks for approval.
+    """
+    library = load_skills(cfg.skills_path, enabled = cfg.skills_enabled)
+    if inp.action == 'load':
+        wanted = inp.name.strip()
+        if not wanted:
+            return '[skills]: action=load needs a name. Use action=list to see the names.'
+        skill = library.get(wanted)
+        if skill is None:
+            return (f'[skills]: no skill named {wanted!r}. '
+                    f'Available: {", ".join(library.names()) or "none"}.')
+        missing = [name for name in skill.tools if name not in TOOL_NAMES]
+        known = [name for name in skill.tools if name in TOOL_NAMES]
+        SELECTION.activate(known)
+        TRACE.emit('skill_load', skill = skill.name, tools = known, missing = missing,
+                   body_chars = len(skill.body))
+        lines = [f'[skills]: {skill.name} -- {skill.description}']
+        if known:
+            lines.append(f'Tools pinned for this run: {", ".join(known)}.')
+        if missing:
+            lines.append(f'This skill names tools that do not exist here: {", ".join(missing)}.')
+        lines.append('')
+        lines.append(skill.body or '(this skill has no body)')
+        return '\n'.join(lines)
+
+    if not library.skills:
+        return '[skills]: none available. Add a SKILL.md with a description to the skills directory.'
+    lines = [f'[skills]: {len(library.skills)} available']
+    lines.extend(skill.index_line() for _, skill in sorted(library.skills.items()))
+    if library.skipped:
+        lines.append('')
+        lines.extend(f'skipped: {reason}' for reason in library.skipped)
+    lines.append('')
+    lines.append("Use action=load with a name to bring one into the conversation.")
+    return '\n'.join(lines)
+
 class RunBashInput(BaseModel):
     model_config = ConfigDict(extra = 'forbid')
     command: Nonblank = Field(description = 'the command used to operate the terminal')
@@ -1086,8 +1134,12 @@ TOOLS = [
     ToolDefinition('run_todo', 'build and update the todo list', RunTodoInput, run_todo, False),
     ToolDefinition('recall', 'Search the earlier part of this conversation that context compaction removed and replaced with a summary. Use it when you need a detail the summary no longer carries, such as an exact value, path, command or error message from earlier.', RecallInput, recall, False),
     ToolDefinition('find_tools', 'Find tools that are not currently available and bring them into play for the rest of the run. Use it when you need a capability you do not appear to have, for example a browser, a database, or another MCP server.', FindToolsInput, find_tools, False),
+    ToolDefinition('skills', 'List the skills available in this workspace, or load one. A skill is a written procedure for a kind of task; its description is shown here and its steps are returned when you load it.', SkillsInput, skills, False),
     ToolDefinition('run_subagent', 'build and run the subagent to finish the task', RunSubAgentInput, run_subagent, True)
 ]
+
+# The names a skill is allowed to name, resolved once the registry exists.
+TOOL_NAMES = frozenset(tool.name for tool in TOOLS)
 
 validate_tools(TOOLS)
 

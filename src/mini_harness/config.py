@@ -129,6 +129,12 @@ class Config:
     # built-ins and anything find_tools pulled in always present.
     tool_budget: int = 0
 
+    # Skills: Markdown procedures under this directory. Their one-line
+    # descriptions go into the system prompt; the bodies are loaded on request.
+    # Empty means <workspace>/skills.
+    skills_enabled: bool = True
+    skills_dir: str = ''
+
     # Retrievable memory. Compaction is lossy, so what it removes stays
     # searchable through the recall tool.
     recall_enabled: bool = True
@@ -303,6 +309,10 @@ O4. find_tools: when the tool you would reach for is not in the current list, ca
         return self.work_space/'sandbox'
 
     @property
+    def skills_path(self) -> Path:
+        return Path(self.skills_dir) if self.skills_dir else self.work_space/'skills'
+
+    @property
     def thinking_main(self) -> dict:
         if self.provider == 'openai':
             return {}
@@ -421,7 +431,8 @@ def build_config() -> Config:
     for env_name, field_name in (('MINI_HARNESS_RECALL_BACKEND', 'recall_backend'),
                                  ('MINI_HARNESS_EMBED_MODEL', 'embed_model'),
                                  ('MINI_HARNESS_EMBED_BASE_URL', 'embed_base_url'),
-                                 ('MINI_HARNESS_EMBED_API_KEY', 'embed_api_key')):
+                                 ('MINI_HARNESS_EMBED_API_KEY', 'embed_api_key'),
+                                 ('MINI_HARNESS_SKILLS_DIR', 'skills_dir')):
         if value := os.environ.get(env_name):
             overrides[field_name] = value
     if backend := overrides.get('recall_backend'):
@@ -433,6 +444,7 @@ def build_config() -> Config:
                            ('MINI_HARNESS_VERIFY_REQUIRED', 'verify_required'),
                            ('MINI_HARNESS_RECALL', 'recall_enabled'),
                            ('MINI_HARNESS_QUIET_TOOLS', 'quiet_tools'),
+                           ('MINI_HARNESS_SKILLS', 'skills_enabled'),
                            ('MINI_HARNESS_MCP_RISKY', 'mcp_risky')):
         if value := os.environ.get(variable):
             overrides[name] = env_flag(value, variable)
