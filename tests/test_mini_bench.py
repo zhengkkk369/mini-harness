@@ -88,41 +88,81 @@ def test_every_task_starts_unsolved(task, tmp_path):
 
 
 REFERENCE = {
-    'rolling_window': ('window.py',
+    'rolling_window': {'window.py':
                        'def rolling_max(values, k):\n'
                        '    """The maximum of every window of size k."""\n'
                        '    if k <= 0:\n'
                        '        raise ValueError("k must be positive")\n'
                        '    if k > len(values):\n'
                        '        return []\n'
-                       '    return [max(values[i:i + k]) for i in range(len(values) - k + 1)]\n'),
-    'round_half_up': ('rounding.py',
+                       '    return [max(values[i:i + k]) for i in range(len(values) - k + 1)]\n'},
+    'round_half_up': {'rounding.py':
                       'from decimal import ROUND_HALF_UP, Decimal\n'
                       '\n'
                       'def round_half_up(value, places=0):\n'
                       '    """Round to the nearest value, ties away from zero."""\n'
                       '    quantum = Decimal(1).scaleb(-places)\n'
                       '    rounded = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)\n'
-                      '    return int(rounded) if places == 0 else float(rounded)\n'),
-    'sample_variance': ('spread.py',
+                      '    return int(rounded) if places == 0 else float(rounded)\n'},
+    'sample_variance': {'spread.py':
                         'def variance(values):\n'
                         '    """The spread of the values, as a sample variance."""\n'
                         '    if len(values) < 2:\n'
                         '        raise ValueError("at least two values are needed")\n'
                         '    mean = sum(values) / len(values)\n'
-                        '    return sum((value - mean) ** 2 for value in values) / (len(values) - 1)\n'),
-    'split_cents': ('split.py',
+                        '    return sum((value - mean) ** 2 for value in values) / (len(values) - 1)\n'},
+    'split_cents': {'split.py':
                     'def split_cents(total, parts):\n'
                     '    """Divide an amount in whole cents into that many parts."""\n'
                     '    if parts <= 0:\n'
                     '        raise ValueError("parts must be positive")\n'
                     '    base, extra = divmod(total, parts)\n'
-                    '    return [base + 1] * extra + [base] * (parts - extra)\n'),
+                    '    return [base + 1] * extra + [base] * (parts - extra)\n'},
+    # Three files, and none of them is sufficient alone.
+    'calc_package': {
+        'calc/ops.py':
+            'def add(a, b):\n'
+            '    """The sum of two numbers."""\n'
+            '    return a + b\n'
+            '\n'
+            '\n'
+            'def multiply(a, b):\n'
+            '    """The product of two numbers."""\n'
+            '    return a * b\n',
+        'calc/text.py':
+            'def percent(value, total):\n'
+            '    """The value as a percentage of the total, rounded to a whole number."""\n'
+            '    if total == 0:\n'
+            '        return "0%"\n'
+            '    return f"{round(value / total * 100)}%"\n',
+        'calc/__init__.py':
+            'from calc.ops import add, multiply\n'
+            'from calc.text import percent\n',
+    },
+    # Reading the constant at call time, from the module, is the whole task:
+    # `from limits import LIMIT` binds once and fails the suite.
+    'single_source_of_truth': {
+        'reader.py':
+            'import limits\n'
+            '\n'
+            '\n'
+            'def read(page):\n'
+            '    """How many results one page holds."""\n'
+            '    return min(page, limits.LIMIT)\n',
+        'writer.py':
+            'import limits\n'
+            '\n'
+            '\n'
+            'def write(items):\n'
+            '    """The items that fit on one page."""\n'
+            '    return items[:limits.LIMIT]\n',
+    },
 }
 
-# These three ship their specification as a test file, so the checker also has
-# to refuse a weakened one. split_cents has no suite to weaken.
-SUITE_TASKS = ['rolling_window', 'round_half_up', 'sample_variance']
+# The three with a shipped suite in the sandbox, which the checker also has to
+# refuse to see weakened. split_cents has no suite to weaken.
+SUITE_TASKS = ['rolling_window', 'round_half_up', 'sample_variance',
+               'calc_package', 'single_source_of_truth']
 
 
 def tasks_in(names):
@@ -130,7 +170,8 @@ def tasks_in(names):
 
 
 def test_the_tiers_are_wired_up():
-    assert sorted(REFERENCE) == ['rolling_window', 'round_half_up', 'sample_variance', 'split_cents']
+    assert sorted(REFERENCE) == ['calc_package', 'rolling_window', 'round_half_up',
+                                 'sample_variance', 'single_source_of_truth', 'split_cents']
     assert set(SUITE_TASKS) < set(REFERENCE)
     assert {task.name for task in tasks_in(REFERENCE)} == set(REFERENCE)
 
@@ -139,8 +180,8 @@ def test_the_tiers_are_wired_up():
 def test_a_reference_solution_passes(task, tmp_path):
     """The checker accepts a correct fix, which is the one thing it must do."""
     sandbox = prepare(task, tmp_path)
-    name, body = REFERENCE[task.name]
-    (sandbox / name).write_text(body, encoding='utf-8')
+    for name, body in REFERENCE[task.name].items():
+        (sandbox / name).write_text(body, encoding='utf-8')
 
     ok, detail = task.check(sandbox, '')
 
@@ -151,8 +192,8 @@ def test_a_reference_solution_passes(task, tmp_path):
 def test_the_specification_suite_cannot_be_weakened(task, tmp_path):
     """Gutting the test is not a solution, even when the code is fixed."""
     sandbox = prepare(task, tmp_path)
-    name, body = REFERENCE[task.name]
-    (sandbox / name).write_text(body, encoding='utf-8')
+    for name, body in REFERENCE[task.name].items():
+        (sandbox / name).write_text(body, encoding='utf-8')
     suite = next(path for path in sorted(sandbox.glob('test_*.py')))
     suite.write_text('import unittest\n\n\nif __name__ == "__main__":\n    unittest.main()\n',
                      encoding='utf-8')
@@ -166,8 +207,8 @@ def test_the_specification_suite_cannot_be_weakened(task, tmp_path):
 @pytest.mark.parametrize('task', tasks_in(SUITE_TASKS), ids=lambda task: task.name)
 def test_a_deleted_specification_suite_is_not_a_pass(task, tmp_path):
     sandbox = prepare(task, tmp_path)
-    name, body = REFERENCE[task.name]
-    (sandbox / name).write_text(body, encoding='utf-8')
+    for name, body in REFERENCE[task.name].items():
+        (sandbox / name).write_text(body, encoding='utf-8')
     next(path for path in sorted(sandbox.glob('test_*.py'))).unlink()
 
     ok, detail = task.check(sandbox, '')

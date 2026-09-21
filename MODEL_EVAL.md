@@ -76,13 +76,15 @@ The count and the line count are both correct, so the whole path works: TUI
 event loop, JSON worker protocol, real tool execution, real model, streaming
 into the feed.
 
-## 2. Mini benchmark: 16 tasks, 4 configurations, 2 repeats
+## 2. Mini benchmark: 18 tasks, 4 configurations, 2 repeats
 
 `bench/mini_bench.py` — every task is stdlib-only and every check is an
 assertion run by the harness process, so a pass never depends on the model
-saying it passed. There are sixteen tasks: four state their contract only in
-prose, three ship a runnable specification, and the rest ship a checker in the
-sandbox. Whether the code is ever run is entirely the model's choice.
+saying it passed. There are eighteen tasks in three tiers: five state their
+contract only in prose, five ship a runnable specification in the sandbox, and
+two of those five span three files and cannot be finished by editing one of them.
+The rest ship a checker. Whether the code is ever run is entirely the model's
+choice.
 
 | config | what changes |
 | --- | --- |
@@ -225,6 +227,50 @@ to the total. Nothing in the sandbox checks it.
 
 The model reached for the remainder distribution on the first attempt in all
 twelve runs, so this experiment also measured the model rather than the loop.
+
+### A long-horizon tier, and the third ceiling
+
+Small tasks are solved on the first attempt, and so are the three with a shipped
+suite. The next tier up is a change that spans three files, where the failure is
+not visible in the file the model edits first and the only way to know it is
+finished is to run the suite:
+
+| task | what makes it long |
+| --- | --- |
+| `calc_package` | a bug in `calc/ops.py` and one in `calc/text.py`, plus `calc/__init__.py` not exporting `percent`: one edit leaves the suite red |
+| `single_source_of_truth` | `reader.py` and `writer.py` each carry their own copy of a limit; `from limits import LIMIT` reads once at import and still fails the suite, so the fix has to read it at call time |
+
+Twelve runs (2 tasks, 2 configurations, 3 repeats):
+
+| config | passed | median turns | total tokens | cost |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 6/6 | 6 | 210,247 | $0.0079 |
+| `no_verify` | 6/6 | 7 | 193,962 | $0.0074 |
+
+**The ceiling did not move, and the nudge still never fired.** All twelve runs
+passed, with no nudges in either configuration: the model reads the shipped
+suite, edits all the files the failure needs, and runs it before answering — on
+its own, without being asked.
+
+A weaker model was the other lever, and it did not move either. The same twelve
+runs against `deepseek-chat` (the non-reasoning model, `--model deepseek-chat`)
+also passed 12/12 with no nudges:
+
+| config | passed | median turns | total tokens | cost |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 6/6 | 7 | 207,343 | $0.0075 |
+| `no_verify` | 6/6 | 6 | 226,547 | $0.0081 |
+
+That is three task shapes (prose-only, shipped suite, multi-file long-horizon)
+and two models: **this suite cannot rank configurations, and shaping the tasks at
+this size is not what will change that.** A configuration difference would need
+tasks at the scale where an agent actually fails — the SWE-bench path, with its
+own cost and its own caveats — or an axis other than pass/fail. The turns, tokens
+and cost columns are the axes this suite does have, and the repeats measured so
+far put their differences inside the noise.
+
+`--model` stays in the runner for anyone who wants to look for headroom with a
+model weaker than these two.
 
 ### What would be needed to show the loop's benefit
 

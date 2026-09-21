@@ -339,6 +339,139 @@ def check_test_suite(sandbox: Path, body: str, name: str):
     return code == 0, f'exit={code} out={tail(out)!r}'
 
 
+def check_suite_files(sandbox: Path, files: dict, runner: str):
+    """The same rule for a task whose specification spans more than one file."""
+    for name, body in files.items():
+        path = sandbox / name
+        if not path.exists():
+            return False, f'{name} was deleted; it is the specification'
+        if path.read_text(encoding='utf-8') != body:
+            return False, f'{name} was modified; it is the specification'
+    code, out = run_file(sandbox, runner)
+    return code == 0, f'exit={code} out={tail(out)!r}'
+
+
+# The two tasks below are the long-horizon ones: the change spans three files, the
+# failure is not visible in the file the model edits first, and the only way to
+# know it is done is to run the suite. They exist because everything else in this
+# suite is solved on the first attempt, which leaves nothing for a configuration
+# difference to show.
+CALC_SUITE = '''import unittest
+
+from calc import percent as exported
+from calc.ops import add, multiply
+from calc.text import percent
+
+
+class Calc(unittest.TestCase):
+    def test_add(self):
+        self.assertEqual(add(2, 3), 5)
+
+    def test_multiply(self):
+        self.assertEqual(multiply(3, 4), 12)
+
+    def test_multiply_by_zero(self):
+        self.assertEqual(multiply(3, 0), 0)
+
+    def test_a_quarter(self):
+        self.assertEqual(percent(1, 4), '25%')
+
+    def test_rounding(self):
+        self.assertEqual(percent(1, 3), '33%')
+
+    def test_no_total(self):
+        self.assertEqual(percent(3, 0), '0%')
+
+    def test_the_package_exports_it(self):
+        self.assertEqual(exported(1, 2), '50%')
+
+
+if __name__ == '__main__':
+    unittest.main()
+'''
+
+
+def setup_calc_package(sandbox: Path) -> None:
+    write(sandbox, 'calc/__init__.py', 'from calc.ops import add, multiply\n')
+    write(sandbox, 'calc/ops.py',
+          'def add(a, b):\n'
+          '    """The sum of two numbers."""\n'
+          '    return a + b\n'
+          '\n'
+          '\n'
+          'def multiply(a, b):\n'
+          '    """The product of two numbers."""\n'
+          '    total = 0\n'
+          '    for _ in range(b - 1):\n'
+          '        total += a\n'
+          '    return total\n')
+    write(sandbox, 'calc/text.py',
+          'def percent(value, total):\n'
+          '    """The value as a percentage of the total, rounded to a whole number."""\n'
+          '    if total == 0:\n'
+          '        return "0%"\n'
+          '    return f"{value / total}"\n')
+    write(sandbox, 'test_calc.py', CALC_SUITE)
+
+
+def check_calc_package(sandbox: Path, answer: str):
+    return check_suite_files(sandbox, {'test_calc.py': CALC_SUITE}, 'test_calc.py')
+
+
+LIMITS_SUITE = '''import unittest
+
+import limits
+import reader
+import writer
+
+
+class SingleSource(unittest.TestCase):
+    def setUp(self):
+        self.original = limits.LIMIT
+
+    def tearDown(self):
+        limits.LIMIT = self.original
+
+    def test_the_default(self):
+        self.assertEqual(limits.LIMIT, 10)
+
+    def test_the_reader_follows_the_constant(self):
+        limits.LIMIT = 3
+        self.assertEqual(reader.read(5), 3)
+
+    def test_the_writer_follows_the_constant(self):
+        limits.LIMIT = 3
+        self.assertEqual(len(writer.write(list(range(10)))), 3)
+
+
+if __name__ == '__main__':
+    unittest.main()
+'''
+
+
+def setup_limit_modules(sandbox: Path) -> None:
+    write(sandbox, 'limits.py', 'LIMIT = 10\n')
+    write(sandbox, 'reader.py',
+          'LIMIT = 10\n'
+          '\n'
+          '\n'
+          'def read(page):\n'
+          '    """How many results one page holds."""\n'
+          '    return min(page, LIMIT)\n')
+    write(sandbox, 'writer.py',
+          'LIMIT = 10\n'
+          '\n'
+          '\n'
+          'def write(items):\n'
+          '    """The items that fit on one page."""\n'
+          '    return items[:LIMIT]\n')
+    write(sandbox, 'test_limits.py', LIMITS_SUITE)
+
+
+def check_limit_modules(sandbox: Path, answer: str):
+    return check_suite_files(sandbox, {'test_limits.py': LIMITS_SUITE}, 'test_limits.py')
+
+
 # This one carries no checker at all, on purpose. The contract is stated in
 # prose and is fully determined, but the obvious implementation -- an even
 # division -- is wrong, and being wrong is invisible without running something.
@@ -592,6 +725,22 @@ TASKS = [
          'zero or less must raise ValueError. Fix split_cents.',
          setup_split_cents, check_split_cents,
          note='prose only; the obvious even split does not sum to the total'),
+    # The long-horizon tier: three files, a failure the first edit does not fix,
+    # and a suite that has to be run to know.
+    Task('calc_package',
+         'sandbox/calc/ is a small package with three problems. sandbox/test_calc.py is the '
+         'specification of what it should do: make that suite pass, changing only the files '
+         'under sandbox/calc/ and never the test file. More than one file needs changing, and '
+         'the first one you look at is not the last one.',
+         setup_calc_package, check_calc_package,
+         note='specification is a test file in the sandbox; the fix spans three files'),
+    Task('single_source_of_truth',
+         'sandbox/reader.py and sandbox/writer.py each carry their own copy of the page limit '
+         'that sandbox/limits.py defines. Make limits.py the single source of truth: setting '
+         'limits.LIMIT at run time must change what both modules do. sandbox/test_limits.py is '
+         'the specification; make it pass without editing it.',
+         setup_limit_modules, check_limit_modules,
+         note='specification is a test file in the sandbox; importing the name is not enough'),
 ]
 
 CONFIGS = {
@@ -646,6 +795,7 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         'task': task.name,
         'config': name,
         'repeat': repeat,
+        'model': cfg.model_main,
         'passed': bool(ok),
         'detail': detail,
         'outcome': result.outcome,
@@ -728,6 +878,9 @@ def main() -> int:
     parser.add_argument('--turns', type=int, default=30)
     parser.add_argument('--timeout', type=float, default=240.0, help='wall budget per run, seconds')
     parser.add_argument('--repeats', type=int, default=1, help='runs per task and configuration')
+    parser.add_argument('--model', default=None,
+                        help='override the model for every configuration, to look for headroom')
+    parser.add_argument('--sub-model', default=None, help='override the sub-model (compaction, subagents)')
     parser.add_argument('--price-in', type=float, default=None, help='dollars per million prompt tokens')
     parser.add_argument('--price-out', type=float, default=None, help='dollars per million output tokens')
     parser.add_argument('--price-cache-in', type=float, default=None,
@@ -745,6 +898,13 @@ def main() -> int:
             overrides['price_out'] = args.price_out
             if args.price_cache_in is not None:
                 overrides['price_cache_in'] = args.price_cache_in
+    # A weaker or stronger model is the other way to find headroom: a suite that
+    # every configuration solves says nothing about either.
+    for overrides in configs.values():
+        if args.model:
+            overrides['model_main'] = args.model
+        if args.sub_model:
+            overrides['model_sub'] = args.sub_model
 
     rows = []
     for name, overrides in configs.items():
