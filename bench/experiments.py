@@ -15,6 +15,7 @@ Experiments:
     verify     turns, nudges and the verified flag for the verification loop
     policy     which calls a deny policy refuses, and under which tag
     recall     whether recall ranks a planted detail first as the archive grows
+    compaction what a compaction removes, archives, and keeps reachable
     vector     what the vector backend embeds and what it costs to search
     exposure   request schema payload of a tool surface, with and without a budget
 """
@@ -41,8 +42,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from mini_harness import agent as agent_module  # noqa: E402
 from mini_harness.agent import CORE_TOOLS, DeepSeekAgent  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
+from mini_harness.compact import COMPACT  # noqa: E402
 from mini_harness.embed import HashEmbedder  # noqa: E402
-from mini_harness.memory import Memory  # noqa: E402
+from mini_harness.memory import Memory, journal_for  # noqa: E402
 from mini_harness.selector import SELECTION, select  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.box import TOOLS, ToolDefinition, find_tools  # noqa: E402
@@ -348,6 +350,181 @@ RECALL_FACTS = [
 ]
 FILLER = ('config cache worker queue schema index buffer handler parser session timeout '
           'retry logger metric deploy rollout cluster shard replica').split()
+
+# Facts planted into a conversation that is then compacted. The question is not
+# whether a model can summarise -- that needs a model -- but what the machinery
+# removes, what it archives, and whether recall can reach it afterwards.
+COMPACT_FACTS = [
+    ('deploy window', 'the deploy window is 02:00 to 04:00 UTC on weekdays'),
+    ('service token name', 'the service token is stored in SERVICE_TOKEN'),
+    ('listening port', 'the service listens on port 8443'),
+    ('retry budget', 'the retry budget is five attempts per request'),
+    ('database host', 'the database host is db.internal'),
+    ('cache lifetime', 'the cache is invalidated every 15 minutes'),
+]
+
+
+class SummaryStub:
+    """A summariser the experiment controls.
+
+    ``verbatim`` returns the prompt it was given, which is an upper bound no real
+    model reaches: the summary then carries every removed message. The default
+    returns a sentence that mentions nothing, which is the lower bound. Reality
+    sits between the two, and that gap is the part this experiment cannot measure.
+    """
+
+    def __init__(self, verbatim: bool = False, prompt_tokens: int = 4000,
+                 completion_tokens: int = 200) -> None:
+        self.verbatim = verbatim
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.calls = 0
+        self.seen = ''
+
+    def _create(self, **kwargs):
+        self.calls += 1
+        self.seen = kwargs['messages'][-1]['content']
+        content = self.seen if self.verbatim else 'The user asked several questions and I answered.'
+        message = SimpleNamespace(content = content)
+        usage = SimpleNamespace(prompt_tokens = self.prompt_tokens,
+                                completion_tokens = self.completion_tokens)
+        return SimpleNamespace(choices = [SimpleNamespace(message = message)], usage = usage)
+
+    @property
+    def chat(self):
+        return SimpleNamespace(completions = SimpleNamespace(create = self._create))
+
+
+def _conversation(turns: int, filler: int = 3) -> list:
+    """A conversation with the facts planted at increasing depth.
+
+    Facts arrive as the user's own messages, which is where a real requirement
+    would arrive, and the filler is long enough that they are a small part of
+    what compaction removes.
+    """
+    messages = [{'role': 'system', 'content': 'system prompt'}]
+    facts = list(COMPACT_FACTS)
+    for index in range(turns):
+        messages.append({'role': 'user', 'content': f'question {index}: {_distractors(1)[0]}'})
+        for _ in range(filler):
+            messages.append({'role': 'assistant', 'content': _distractors(1)[0]})
+            messages.append({'role': 'tool', 'tool_call_id': f'c{len(messages)}',
+                             'content': _distractors(2)[0]})
+        if facts:
+            _, fact = facts.pop(0)
+            messages.append({'role': 'user', 'content': fact})
+        messages.append({'role': 'assistant', 'content': f'answer {index}'})
+    return messages
+
+
+def _facts_in_context(messages: list) -> set:
+    text = json.dumps(messages, ensure_ascii = False)
+    return {key for key, fact in COMPACT_FACTS if fact in text}
+
+
+def _facts_in_archive(memory) -> set:
+    text = '\n'.join(entry.text for entry in memory.entries())
+    return {key for key, fact in COMPACT_FACTS if fact in text}
+
+
+def experiment_compaction(turns_list, recent_keep):
+    """What compaction removes, what stays reachable, and at what cost.
+
+    The summariser is a stub in both directions, so this measures the machinery:
+    how much of the conversation leaves the context, whether the archive holds it,
+    and whether recall finds it again. The summary's own quality needs a real
+    model and is not measured here.
+    """
+    workdir = WORK / 'compaction'
+    workdir.mkdir(parents = True, exist_ok = True)
+    rows = []
+    for turns in turns_list:
+        for stub_name, verbatim in (('verbatim', True), ('losing', False)):
+            session = workdir / f'session-{turns}-{stub_name}.json'
+            session.unlink(missing_ok = True)
+            journal_for(session).unlink(missing_ok = True)
+            cfg = config_for(workdir, recent_keep = recent_keep)
+            messages = _conversation(turns)
+            stub = SummaryStub(verbatim = verbatim)
+
+            start = time.perf_counter()
+            after = COMPACT.compact_content(stub, messages, session, cfg = cfg)
+            compact_ms = (time.perf_counter() - start) * 1000
+
+            memory = Memory(journal_for(session))
+            in_context = _facts_in_context(after)
+            archived = _facts_in_archive(memory)
+
+            top1 = top3 = 0
+            samples = []
+            for key, fact in COMPACT_FACTS:
+                if key not in archived:
+                    continue
+                started = time.perf_counter()
+                hits = memory.search(key, limit = 3)
+                samples.append(time.perf_counter() - started)
+                if hits and hits[0].text == fact:
+                    top1 += 1
+                if any(hit.text == fact for hit in hits):
+                    top3 += 1
+            rows.append({
+                'turns': turns,
+                'summary': stub_name,
+                'messages_before': len(messages),
+                'messages_after': len(after),
+                'removed': len(messages) - len(after),
+                'facts': len(COMPACT_FACTS),
+                'facts_in_context': len(in_context),
+                'facts_archived': len(archived),
+                'recall_top1': top1,
+                'recall_top3': top3,
+                'asked': len(archived),
+                'search_ms': statistics.median(samples) * 1000 if samples else 0.0,
+                'compact_ms': compact_ms,
+                'summary_calls': stub.calls,
+            })
+    return rows
+
+
+def experiment_compaction_repeat(turns_list, recent_keep, passes = 3):
+    """Does a fact survive being compacted away more than once?
+
+    A long run compacts repeatedly: the conversation shrinks while the archive
+    grows. The first pass's facts have to stay reachable through every later pass,
+    or "retrievable memory" would only mean the most recent loss.
+    """
+    workdir = WORK / 'compaction-repeat'
+    workdir.mkdir(parents = True, exist_ok = True)
+    rows = []
+    for turns in turns_list:
+        session = workdir / f'session-{turns}.json'
+        session.unlink(missing_ok = True)
+        journal_for(session).unlink(missing_ok = True)
+        cfg = config_for(workdir, recent_keep = recent_keep)
+        messages = _conversation(turns)
+        early = _facts_in_context(messages)
+        reachable = []
+        sizes = []
+        for _ in range(passes):
+            messages = COMPACT.compact_content(SummaryStub(verbatim = True), messages, session,
+                                               cfg = cfg)
+            # The conversation keeps going between compactions, which is what
+            # makes a later pass remove something the archive already holds.
+            messages.extend(_conversation(2)[1:])
+            memory = Memory(journal_for(session))
+            sizes.append(len(memory.entries()))
+            reachable.append(sum(1 for key, fact in COMPACT_FACTS
+                                 if key in early
+                                 and any(hit.text == fact for hit in memory.search(key, limit = 3))))
+        rows.append({
+            'turns': turns,
+            'passes': passes,
+            'early_facts': len(early),
+            'reachable_after_each_pass': reachable,
+            'archive_entries': sizes,
+        })
+    return rows
+
 
 
 def _distractors(count):
@@ -669,6 +846,29 @@ def render(results):
         lines.append(f"| {row['distractors']} | {row['lexical_ms']:.2f} | {row['vector_ms']:.2f} | "
                      f"{row['hybrid_ms']:.2f} | {row['top1_lexical']}/{row['queries']} | "
                      f"{row['top1_vector']}/{row['queries']} | {row['top1_hybrid']}/{row['queries']} |")
+    lines += ['', '## Compaction fidelity', '',
+              'A conversation with six planted facts, compacted once. The summariser is a stub in both '
+              'directions: "verbatim" returns the removed text, which no real model does, and "losing" '
+              'returns a sentence that mentions nothing. Reality sits between them, and the gap is the '
+              'part this experiment cannot measure.',
+              '', '| turns | summariser | messages before | after | removed | facts in context | '
+              'archived | recall top-1 | recall top-3 | compact (ms) |',
+              '| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for row in results['compaction']:
+        lines.append(f"| {row['turns']} | {row['summary']} | {row['messages_before']} | "
+                     f"{row['messages_after']} | {row['removed']} | "
+                     f"{row['facts_in_context']}/{row['facts']} | {row['facts_archived']} | "
+                     f"{row['recall_top1']}/{row['asked']} | {row['recall_top3']}/{row['asked']} | "
+                     f"{row['compact_ms']:.2f} |")
+    lines += ['', '### Re-compaction', '',
+              'A fact the first pass removed, and whether it is still reachable after each later one.',
+              '', '| turns | passes | early facts | reachable after each pass | archive entries |',
+              '| ---: | ---: | ---: | --- | --- |']
+    for row in results['compaction_repeat']:
+        reach = ' -> '.join(f"{value}/{row['early_facts']}"
+                            for value in row['reachable_after_each_pass'])
+        sizes = ', '.join(str(size) for size in row['archive_entries'])
+        lines.append(f"| {row['turns']} | {row['passes']} | {row['early_facts']} | {reach} | {sizes} |")
     lines += ['', '## Dispatch policy', '', '| call | ok | tag |', '| --- | --- | --- |']
     for row in results['policy']:
         lines.append(f"| {row['call']} | {row['ok']} | {row['tag']} |")
@@ -711,6 +911,8 @@ def main():
         'trace': experiment_trace(args.repeats, (args.turns, args.turns * 10)),
         'verify': experiment_verify(args.repeats),
         'recall': experiment_recall((50, 200, 800)),
+        'compaction': experiment_compaction((6, 12, 30), 8),
+        'compaction_repeat': experiment_compaction_repeat((12,), 8),
         'vector': experiment_vector_recall((50, 200, 800)),
         'policy': experiment_policy(),
         'exposure': experiment_exposure(24, (0, 8, 12), 'fix the failing test in the parser'),

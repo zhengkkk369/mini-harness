@@ -1,9 +1,9 @@
 # Harness experiments
 
 Measurements of the mini-harness mechanisms added in this repository: parallel
-tool execution, subagent concurrency, the event trace, retrievable memory, the
-pluggable vector backend, the verification loop, the dispatch policy, and the
-tool-exposure budget.
+tool execution, subagent concurrency, the event trace, retrievable memory,
+compaction fidelity, the pluggable vector backend, the verification loop, the
+dispatch policy, and the tool-exposure budget.
 
 ## What these numbers are, and what they are not
 
@@ -48,9 +48,9 @@ not instant (a network fetch, a subprocess, a large file). Six calls with
 
 | Injected latency | Calls | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: | ---: |
-| 0 ms | 6 | 43.75 ms | 24.20 ms | 1.81x |
-| 5 ms | 6 | 76.64 ms | 25.95 ms | 2.95x |
-| 20 ms | 6 | 163.06 ms | 42.50 ms | 3.84x |
+| 0 ms | 6 | 45.96 ms | 27.57 ms | 1.67x |
+| 5 ms | 6 | 82.17 ms | 30.15 ms | 2.73x |
+| 20 ms | 6 | 172.62 ms | 46.49 ms | 3.71x |
 
 Reading this:
 
@@ -58,16 +58,16 @@ Reading this:
   the expected shape: with six calls in flight and no shared bottleneck, the
   floor is one call's latency rather than six.
 - The speedup never reaches the ideal 6x. At 20 ms the concurrent batch takes
-  42.5 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
+  46.5 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
   (argument validation, the file-state record, output handling) still runs under
   the GIL, and the pool has its own start-up cost.
-- Even with **no injected latency** the concurrent path is 1.81x faster, so real
+- Even with **no injected latency** the concurrent path is 1.67x faster, so real
   file reads and MD5 digests do overlap. I did not profile further, so I cannot
   attribute that split between filesystem concurrency and `hashlib` releasing the
   GIL.
-- The reading moves between runs with machine load: earlier recorded runs of this
-  same experiment put the three rows at 1.55-1.90x, 1.28-2.98x and 2.68-3.87x.
-  The shape is stable; the third digit is not.
+- The reading moves between runs with machine load: recorded runs of this same
+  experiment put the three rows anywhere between 1.55 and 1.90x, 1.28 and 2.98x,
+  and 2.68 and 4.04x. The shape is stable; the third digit is not.
 - A batch is only ever overlapped when every call is safe to overlap:
   side-effect free (`read_file`, `grep_file`, `glob_file`), or a batch consisting
   entirely of subagents. One write, one shell call, one unknown name, or a mix of
@@ -82,8 +82,8 @@ models.
 
 | Injected latency | Calls | Serial (median) | Concurrent (median) | Speedup |
 | ---: | ---: | ---: | ---: | ---: |
-| 20 ms | 4 | 82.38 ms | 24.66 ms | 3.34x |
-| 100 ms | 4 | 402.92 ms | 103.94 ms | 3.88x |
+| 20 ms | 4 | 82.57 ms | 25.39 ms | 3.25x |
+| 100 ms | 4 | 403.05 ms | 104.58 ms | 3.85x |
 
 This is close to the ideal 4x, and closer than the read batch gets, because the
 stubbed subagent releases the GIL for the whole of its latency while a file read
@@ -103,10 +103,10 @@ The same scripted run with the trace off and on, at two lengths: 20 tool turns
 
 | Trace | Turns | Events | Median | Min | Max | Bytes written |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| off | 20 | 0 | 119.71 ms | 101.25 ms | 215.50 ms | 0 |
-| on | 20 | 84 | 142.33 ms | 115.38 ms | 184.59 ms | 11,432 |
-| off | 200 | 0 | 1585.62 ms | 1382.05 ms | 2195.77 ms | 0 |
-| on | 200 | 804 | 1659.17 ms | 1486.76 ms | 2035.79 ms | 108,702 |
+| off | 20 | 0 | 144.14 ms | 137.32 ms | 342.40 ms | 0 |
+| on | 20 | 84 | 163.97 ms | 147.52 ms | 362.70 ms | 11,543 |
+| off | 200 | 0 | 2070.13 ms | 1696.96 ms | 3103.29 ms | 0 |
+| on | 200 | 804 | 2106.72 ms | 1777.89 ms | 2883.31 ms | 108,797 |
 
 Those medians are not the measurement. The two conditions are timed
 **alternately inside each repeat** and the paired difference is what gets a
@@ -114,22 +114,20 @@ median, because timing one block and then the other measures the machine:
 
 | Turns | Events | Overhead (paired median) | Min pair | Max pair | Per event |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20 | 84 | **+11.58 ms** | -62.28 ms | +71.45 ms | 137.9 us |
-| 200 | 804 | **+82.25 ms** | -432.64 ms | +277.12 ms | 102.3 us |
+| 20 | 84 | **+20.06 ms** | -102.42 ms | +199.69 ms | 238.9 us |
+| 200 | 804 | **+58.63 ms** | -412.66 ms | +412.32 ms | 72.9 us |
 
 Reading it:
 
-- **The two lengths agree on the per-event cost, and only the longer run is
-  outside the noise.** 84 events gives +11.58 ms with pairs straddling zero
-  (-62 to +71 ms), which is not a measurement; 804 events gives +82.25 ms, or
-  about **0.10 ms per event**. The 84-event run's 0.14 ms/event is the same
-  number computed from a difference that is itself inside the spread.
-- **More repeats changed the number, which is why there are 15.** At 9 pairs the
-  804-event row read +208.47 ms (0.26 ms/event) and individual pairs reached
-  +1004 ms; one slow pair was carrying most of it. At 15 pairs the same row is
-  +82.25 ms. Earlier recorded runs put the per-event cost between 0.03 and
-  0.26 ms, so the honest form is **"of order 0.1 ms per event"**, not a
-  precise constant.
+- **Only the longer run is outside the noise.** 84 events gives +20.06 ms with
+  pairs spanning -102 to +200 ms, so that row is not a measurement; 804 events
+  gives +58.63 ms, or about **0.07 ms per event**.
+- **The per-event figure moves between runs, and the doc says so.** Recorded
+  runs of this same experiment put the 804-event row at +58.63 ms (0.07), +82.25
+  ms (0.10), +174.02 ms (0.22) and +208.47 ms (0.26); individual pairs have
+  reached +1004 ms. Timing a process that is writing to disk is noisy, and one
+  slow pair can carry the median. The honest form is **"of order 0.1 ms per
+  event"**, not a precise constant -- twice the sample has twice moved it.
 - **Conclusion for a real run.** Tracing a 10,000-event session costs on the
   order of a second of wall clock. Model latency is 10-90 s per request, so this
   is not a reason to leave the trace off -- but it is also not free, and the
@@ -168,9 +166,9 @@ hit counts only when the planted text comes back.
 
 | Distractors | Archived messages | Top-1 | Top-3 | Search (median) |
 | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 5/5 | 5/5 | 0.83 ms |
-| 200 | 205 | 5/5 | 5/5 | 1.50 ms |
-| 800 | 805 | 5/5 | 5/5 | 6.45 ms |
+| 50 | 55 | 5/5 | 5/5 | 2.36 ms |
+| 200 | 205 | 5/5 | 5/5 | 5.09 ms |
+| 800 | 805 | 5/5 | 5/5 | 9.03 ms |
 
 Reading this:
 
@@ -190,24 +188,72 @@ Reading this:
   unique per line. It used to repeat every 15 lines, so the "800 distractor" row
   was really a 15-document archive scanned 805 times.
 
-## 5. Vector retrieval
+## 5. Compaction fidelity
+
+A conversation with six planted facts is compacted once. The summariser is a stub
+in both directions on purpose: `verbatim` returns the removed text, which no real
+model does, and `losing` returns a sentence that mentions nothing. Reality sits
+between them, and that gap is the part this experiment cannot measure.
+
+| Turns | Summariser | Messages before | After | Removed | Facts in context | Archived | Recall top-1 | Recall top-3 | Compact (ms) |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 6 | verbatim | 55 | 10 | 45 | 6/6 | 5 | 5/5 | 5/5 | 14.85 |
+| 6 | losing | 55 | 10 | 45 | 1/6 | 5 | 5/5 | 5/5 | 11.04 |
+| 12 | verbatim | 103 | 10 | 93 | 6/6 | 6 | 6/6 | 6/6 | 7.09 |
+| 12 | losing | 103 | 10 | 93 | 0/6 | 6 | 6/6 | 6/6 | 10.52 |
+| 30 | verbatim | 247 | 10 | 237 | 6/6 | 6 | 6/6 | 6/6 | 7.05 |
+| 30 | losing | 247 | 10 | 237 | 0/6 | 6 | 6/6 | 6/6 | 14.64 |
+
+Reading it:
+
+- **The machinery loses nothing.** Every fact that leaves the context is in the
+  archive, and recall puts it first: 5/5 and 6/6 at every size. "Retrievable
+  memory" means reachable, not forgotten.
+- **The summariser decides what stays in context, and the range is the whole
+  range.** With a summary that carries the removed text, 6/6 facts are still in
+  context; with one that carries nothing, 0/6 are (the 6-turn row keeps 1/6
+  because that fact was never removed). Nothing here flatters the default
+  summariser prompt -- it is simply unmeasured, and this table shows how much
+  rests on it.
+- **One pass can remove almost everything.** At 30 turns, 237 of 247 messages
+  leave the context and 10 remain: after that, the summary is the only carrier of
+  the rest, which is why `recall` exists as the second path.
+- **Compaction in one pass is cheap**: 5-31 ms here, and the real cost is the
+  summariser's own model call. The spread between stubs is the stub's doing -- a
+  verbatim summary is a much longer string to write -- not a property of the
+  mechanism.
+
+### Re-compaction
+
+A fact the first pass removed, and whether it is still reachable after each later
+one. A long run compacts repeatedly: the conversation shrinks while the archive
+grows.
+
+| Turns | Passes | Early facts | Reachable after each pass | Archive entries |
+| ---: | ---: | ---: | --- | --- |
+| 12 | 3 | 6 | 6/6 -> 6/6 -> 6/6 | 94, 113, 132 |
+
+The earliest facts stay reachable through every later pass, so "retrievable
+memory" does not quietly mean "the most recent loss" as the archive grows.
+
+## 6. Vector retrieval
 
 The same archives, searched through the pluggable backend with the offline
 `hash` stand-in, at the embedder's batch size of 96. Cost first:
 
 | Distractors | Archived | Texts embedded | Provider calls | Cold query (ms) | Repeat texts | Repeat calls | Warm query (ms) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 56 | 2 | 13.48 | 0 | 0 | 3.09 |
-| 200 | 205 | 206 | 4 | 52.05 | 0 | 0 | 12.70 |
-| 800 | 805 | 806 | 10 | 191.93 | 0 | 0 | 67.24 |
+| 50 | 55 | 56 | 2 | 22.45 | 0 | 0 | 5.83 |
+| 200 | 205 | 206 | 4 | 103.54 | 0 | 0 | 20.76 |
+| 800 | 805 | 806 | 10 | 321.31 | 0 | 0 | 135.05 |
 
 Then quality and steady-state cost, with the archive already embedded:
 
 | Distractors | Lexical (ms) | Vector (ms) | Hybrid (ms) | Top-1 lexical | Top-1 vector | Top-1 hybrid |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50 | 1.23 | 4.46 | 4.76 | 5/5 | 4/5 | 5/5 |
-| 200 | 1.93 | 12.02 | 14.81 | 5/5 | 3/5 | 5/5 |
-| 800 | 5.45 | 54.09 | 68.02 | 5/5 | 2/5 | 5/5 |
+| 50 | 1.77 | 6.44 | 9.00 | 5/5 | 4/5 | 5/5 |
+| 200 | 2.72 | 20.26 | 25.81 | 5/5 | 3/5 | 5/5 |
+| 800 | 10.06 | 99.48 | 116.37 | 5/5 | 2/5 | 5/5 |
 
 Reading this, including the parts that do not flatter the change:
 
@@ -339,6 +385,12 @@ executed. Both paths are covered in `tests/test_selector.py`.
   -433 ms to +277 ms, and the 84-event run is entirely inside that spread.
   Recorded runs put the per-event cost between 0.03 and 0.26 ms. Treat it as
   "of order 0.1 ms per event", not a constant.
+- **The compaction experiment measures the machinery, not the summary.** Its
+  summariser is a stub at both extremes -- one returns the removed text verbatim,
+  which no real model does, and one returns a sentence that mentions nothing. The
+  table therefore brackets what a real summariser can achieve; it does not
+  measure one, and nothing here should be read as a score for the default
+  summarisation prompt. Measuring that needs a model in the loop.
 - **Retrieval was measured on synthetic text.** Five planted facts per size,
   against filler that shares vocabulary with the queries. Real conversation
   queries are messier, and the useful message may share no rare token with them.
@@ -359,8 +411,10 @@ executed. Both paths are covered in `tests/test_selector.py`.
 | --- | --- |
 | `bench/experiments.py` | the experiment runner; prints a report and writes the raw JSON |
 | `EXPERIMENTS.json` | raw results of the recorded run |
+| `tests/test_experiments_doc.py` | every number above has to be the number the JSON recorded |
 | `tests/test_parallel.py` | overlap is proved with a barrier, not a stopwatch |
 | `tests/test_policy.py` | policy decisions and dispatch attribution |
+| `tests/test_compact.py` | cut-point selection, the summary prompt, and the ordering that makes the archive safe to replay |
 | `tests/test_embed.py` | the embedders, the fusion, the cache and the fallback |
 | `tests/test_selector.py` | the exposure budget, `find_tools`, and the hidden-call refusal |
 | `tests/test_trace.py` | trace format, flushing and failure handling |

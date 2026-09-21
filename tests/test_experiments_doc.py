@@ -62,6 +62,17 @@ def expected_rows(results):
     for row in results['recall']:
         rows.append(f"| {row['distractors']} | {row['entries']} | {row['top1']}/{row['queries']} | "
                     f"{row['top3']}/{row['queries']} | {row['search_ms']:.2f} ms |")
+    for row in results['compaction']:
+        rows.append(f"| {row['turns']} | {row['summary']} | {row['messages_before']} | "
+                    f"{row['messages_after']} | {row['removed']} | "
+                    f"{row['facts_in_context']}/{row['facts']} | {row['facts_archived']} | "
+                    f"{row['recall_top1']}/{row['asked']} | {row['recall_top3']}/{row['asked']} | "
+                    f"{row['compact_ms']:.2f} |")
+    for row in results['compaction_repeat']:
+        reach = ' -> '.join(f"{value}/{row['early_facts']}"
+                            for value in row['reachable_after_each_pass'])
+        sizes = ', '.join(str(size) for size in row['archive_entries'])
+        rows.append(f"| {row['turns']} | {row['passes']} | {row['early_facts']} | {reach} | {sizes} |")
     for row in results['vector']:
         rows.append(f"| {row['distractors']} | {row['entries']} | {row['archive_texts']} | "
                     f"{row['archive_provider_calls']} | {row['cold_query_ms']:.2f} | "
@@ -101,6 +112,6 @@ def test_the_document_reports_the_recorded_python_and_platform(recorded, documen
 
 def test_the_structured_sections_are_present(recorded, document):
     """A section that stops being rendered should not pass unnoticed."""
-    for key in ('parallel', 'subagents', 'trace', 'verify', 'recall', 'vector', 'policy',
-                'exposure', 'recovery'):
+    for key in ('parallel', 'subagents', 'trace', 'verify', 'recall', 'compaction',
+                'compaction_repeat', 'vector', 'policy', 'exposure', 'recovery'):
         assert recorded[key], f'{key} recorded nothing'
