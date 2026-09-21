@@ -26,7 +26,7 @@ answer exactly. For numbers from a real model, see [MODEL_EVAL.md](MODEL_EVAL.md
 | CPU | Intel Core i5-10200H, 4 cores / 8 threads |
 | OS | Windows (see `platform` in `EXPERIMENTS.json`) |
 | Python | 3.12.13 |
-| Repeats | 7 per timed configuration (median reported) |
+| Repeats | 15 per timed configuration (median reported, paired where two conditions are compared) |
 
 ## Reproducing
 
@@ -46,11 +46,11 @@ injected with a fixed sleep in front of the real reader, to model tools that are
 not instant (a network fetch, a subprocess, a large file). Six calls with
 `max_parallel_tools` set to six.
 
-| Injected latency | Serial (median) | Concurrent (median) | Speedup |
-| ---: | ---: | ---: | ---: |
-| 0 ms | 37.25 ms | 23.59 ms | 1.58x |
-| 5 ms | 71.93 ms | 27.14 ms | 2.65x |
-| 20 ms | 161.22 ms | 42.68 ms | 3.78x |
+| Injected latency | Calls | Serial (median) | Concurrent (median) | Speedup |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 ms | 6 | 43.75 ms | 24.20 ms | 1.81x |
+| 5 ms | 6 | 76.64 ms | 25.95 ms | 2.95x |
+| 20 ms | 6 | 163.06 ms | 42.50 ms | 3.84x |
 
 Reading this:
 
@@ -58,13 +58,16 @@ Reading this:
   the expected shape: with six calls in flight and no shared bottleneck, the
   floor is one call's latency rather than six.
 - The speedup never reaches the ideal 6x. At 20 ms the concurrent batch takes
-  42.7 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
+  42.5 ms, not the ~20 ms a perfect pool would give. Some of the per-call work
   (argument validation, the file-state record, output handling) still runs under
   the GIL, and the pool has its own start-up cost.
-- Even with **no injected latency** the concurrent path is 1.58x faster, so real
+- Even with **no injected latency** the concurrent path is 1.81x faster, so real
   file reads and MD5 digests do overlap. I did not profile further, so I cannot
   attribute that split between filesystem concurrency and `hashlib` releasing the
   GIL.
+- The reading moves between runs with machine load: earlier recorded runs of this
+  same experiment put the three rows at 1.55-1.90x, 1.28-2.98x and 2.68-3.87x.
+  The shape is stable; the third digit is not.
 - A batch is only ever overlapped when every call is safe to overlap:
   side-effect free (`read_file`, `grep_file`, `glob_file`), or a batch consisting
   entirely of subagents. One write, one shell call, one unknown name, or a mix of
@@ -77,10 +80,10 @@ A batch of four `run_subagent` calls through the same path. A subagent spends
 its time blocked on its own model calls, which is what the injected latency
 models.
 
-| Injected latency | Serial (median) | Concurrent (median) | Speedup |
-| ---: | ---: | ---: | ---: |
-| 20 ms | 82.45 ms | 24.14 ms | 3.42x |
-| 100 ms | 402.54 ms | 104.00 ms | 3.87x |
+| Injected latency | Calls | Serial (median) | Concurrent (median) | Speedup |
+| ---: | ---: | ---: | ---: | ---: |
+| 20 ms | 4 | 82.38 ms | 24.66 ms | 3.34x |
+| 100 ms | 4 | 402.92 ms | 103.94 ms | 3.88x |
 
 This is close to the ideal 4x, and closer than the read batch gets, because the
 stubbed subagent releases the GIL for the whole of its latency while a file read
@@ -100,10 +103,10 @@ The same scripted run with the trace off and on, at two lengths: 20 tool turns
 
 | Trace | Turns | Events | Median | Min | Max | Bytes written |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| off | 20 | 0 | 213.30 ms | 176.74 ms | 285.70 ms | 0 |
-| on | 20 | 84 | 238.64 ms | 180.87 ms | 687.28 ms | 11,440 |
-| off | 200 | 0 | 2168.54 ms | 1457.16 ms | 3154.18 ms | 0 |
-| on | 200 | 804 | 2371.81 ms | 1473.22 ms | 3722.76 ms | 108,747 |
+| off | 20 | 0 | 119.71 ms | 101.25 ms | 215.50 ms | 0 |
+| on | 20 | 84 | 142.33 ms | 115.38 ms | 184.59 ms | 11,432 |
+| off | 200 | 0 | 1585.62 ms | 1382.05 ms | 2195.77 ms | 0 |
+| on | 200 | 804 | 1659.17 ms | 1486.76 ms | 2035.79 ms | 108,702 |
 
 Those medians are not the measurement. The two conditions are timed
 **alternately inside each repeat** and the paired difference is what gets a
@@ -111,22 +114,26 @@ median, because timing one block and then the other measures the machine:
 
 | Turns | Events | Overhead (paired median) | Min pair | Max pair | Per event |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20 | 84 | **+2.93 ms** | -36.06 ms | +408.98 ms | 34.9 us |
-| 200 | 804 | **+208.47 ms** | -41.57 ms | +1003.70 ms | 259.3 us |
+| 20 | 84 | **+11.58 ms** | -62.28 ms | +71.45 ms | 137.9 us |
+| 200 | 804 | **+82.25 ms** | -432.64 ms | +277.12 ms | 102.3 us |
 
 Reading it:
 
-- **At 84 events the cost is inside the noise**, as the earlier runs of this
-  experiment found from the other direction (+9.2, +13.2, +14.8, +6.2, -5.3 ms).
-  The paired spread (-36 to +409 ms) is wider than the effect.
-- **At 804 events it is no longer inside the noise**: +208 ms for ten times the
-  events, or about **0.26 ms per event**, which agrees with the 0.28-0.30 ms per
-  event that the block-timed version produced at the same size. Two methods, one
-  answer.
-- **Conclusion for a real run.** Tracing a 10,000-event session costs roughly
-  2.6 s of wall clock. Model latency is 10-90 s per request, so this is not a
-  reason to leave the trace off -- but it is also not free, and the earlier
-  version of this code was 20x worse per event.
+- **The two lengths agree on the per-event cost, and only the longer run is
+  outside the noise.** 84 events gives +11.58 ms with pairs straddling zero
+  (-62 to +71 ms), which is not a measurement; 804 events gives +82.25 ms, or
+  about **0.10 ms per event**. The 84-event run's 0.14 ms/event is the same
+  number computed from a difference that is itself inside the spread.
+- **More repeats changed the number, which is why there are 15.** At 9 pairs the
+  804-event row read +208.47 ms (0.26 ms/event) and individual pairs reached
+  +1004 ms; one slow pair was carrying most of it. At 15 pairs the same row is
+  +82.25 ms. Earlier recorded runs put the per-event cost between 0.03 and
+  0.26 ms, so the honest form is **"of order 0.1 ms per event"**, not a
+  precise constant.
+- **Conclusion for a real run.** Tracing a 10,000-event session costs on the
+  order of a second of wall clock. Model latency is 10-90 s per request, so this
+  is not a reason to leave the trace off -- but it is also not free, and the
+  earlier version of this code was 20x worse per event.
 
 The paired design is not decoration. Block-timing the same 804-event run
 reported the trace as **-252 ms** -- faster with tracing on -- because the first
@@ -161,9 +168,9 @@ hit counts only when the planted text comes back.
 
 | Distractors | Archived messages | Top-1 | Top-3 | Search (median) |
 | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 5/5 | 5/5 | 2.04 ms |
-| 200 | 205 | 5/5 | 5/5 | 8.81 ms |
-| 800 | 805 | 5/5 | 5/5 | 13.16 ms |
+| 50 | 55 | 5/5 | 5/5 | 0.83 ms |
+| 200 | 205 | 5/5 | 5/5 | 1.50 ms |
+| 800 | 805 | 5/5 | 5/5 | 6.45 ms |
 
 Reading this:
 
@@ -171,9 +178,11 @@ Reading this:
   present. The distractors share vocabulary with the queries (the filler includes
   words like `deploy`, `retry` and `config`), so this is not a trivial separator.
 - Search cost grows linearly with the archive, because the scorer scans every
-  entry. At 805 entries that is 13 ms, which is nothing next to a model call; at
+  entry. At 805 entries that is 6.5 ms, which is nothing next to a model call; at
   hundreds of thousands of entries it would need an inverted index. This is the
-  main scaling limit of the current implementation.
+  main scaling limit of the current implementation. The absolute figure moves
+  with machine load (recorded runs span 6.5-13.2 ms for the same row); the
+  linear growth is what is stable.
 - Five facts per size is a small sample. It demonstrates that the ranking works,
   not how well it generalises to real conversation text, where queries are
   messier and the useful answer may share no rare token with them.
@@ -188,17 +197,17 @@ The same archives, searched through the pluggable backend with the offline
 
 | Distractors | Archived | Texts embedded | Provider calls | Cold query (ms) | Repeat texts | Repeat calls | Warm query (ms) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50 | 55 | 56 | 2 | 38.97 | 0 | 0 | 13.09 |
-| 200 | 205 | 206 | 4 | 99.43 | 0 | 0 | 21.67 |
-| 800 | 805 | 806 | 10 | 326.22 | 0 | 0 | 78.43 |
+| 50 | 55 | 56 | 2 | 13.48 | 0 | 0 | 3.09 |
+| 200 | 205 | 206 | 4 | 52.05 | 0 | 0 | 12.70 |
+| 800 | 805 | 806 | 10 | 191.93 | 0 | 0 | 67.24 |
 
 Then quality and steady-state cost, with the archive already embedded:
 
 | Distractors | Lexical (ms) | Vector (ms) | Hybrid (ms) | Top-1 lexical | Top-1 vector | Top-1 hybrid |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50 | 1.57 | 7.22 | 7.62 | 5/5 | 4/5 | 5/5 |
-| 200 | 2.83 | 21.93 | 23.27 | 5/5 | 3/5 | 5/5 |
-| 800 | 8.21 | 79.32 | 96.18 | 5/5 | 2/5 | 5/5 |
+| 50 | 1.23 | 4.46 | 4.76 | 5/5 | 4/5 | 5/5 |
+| 200 | 1.93 | 12.02 | 14.81 | 5/5 | 3/5 | 5/5 |
+| 800 | 5.45 | 54.09 | 68.02 | 5/5 | 2/5 | 5/5 |
 
 Reading this, including the parts that do not flatter the change:
 
@@ -217,9 +226,10 @@ Reading this, including the parts that do not flatter the change:
 - **Hybrid is the safe combination.** Fusing the two rankings by reciprocal rank
   holds 5/5 at every size here, because the lexical head keeps its place, while
   the vector half can still surface an entry lexical scoring missed.
-- **The vector scan is pure Python**, so it costs roughly 6-10x a lexical scan at
-  the same size. A real deployment would put both behind a vector index rather
-  than scanning a list.
+- **The vector scan is pure Python**, so it costs a few times a lexical scan at
+  the same size and the gap widens with the archive (3.6x at 55 entries, 10x at
+  805). A real deployment would put both behind a vector index rather than
+  scanning a list.
 
 ## 7. Verification loop
 
@@ -261,7 +271,7 @@ Policy decisions for a representative set of calls, with
 | `run_bash` with `rm -rf /` | no | `policy_denied` |
 | `run_bash` with `ls -la` | yes | success |
 | `run_sandbox` with `ls` | no | `policy_denied` |
-| `read_file` on `tree/f000.py` | yes | success |
+| `read_file` with `tree/f000.py` | yes | success |
 
 A policy refusal is tagged `policy_denied`, not `denied`, so it stays
 distinguishable from a human refusing the same call. The policy is checked
@@ -325,9 +335,10 @@ executed. Both paths are covered in `tests/test_selector.py`.
   always matches the order the model asked for, but the trace file is not
   byte-stable between runs.
 - **The trace cost is measured per event, with a wide spread.** The paired
-  median at 804 events is +208 ms, but individual pairs ranged from -42 ms to
-  +1004 ms, and the 84-event run is entirely inside that spread. Treat ~0.26 ms
-  per event as an order of magnitude, not a constant.
+  median at 804 events is +82 ms with 15 pairs, but individual pairs ranged from
+  -433 ms to +277 ms, and the 84-event run is entirely inside that spread.
+  Recorded runs put the per-event cost between 0.03 and 0.26 ms. Treat it as
+  "of order 0.1 ms per event", not a constant.
 - **Retrieval was measured on synthetic text.** Five planted facts per size,
   against filler that shares vocabulary with the queries. Real conversation
   queries are messier, and the useful message may share no rare token with them.
