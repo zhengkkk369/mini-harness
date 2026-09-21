@@ -373,6 +373,14 @@ class DeepSeekAgent:
 
     def run_task(self, task: str, cfg = CONFIG) -> Result:
         SELECTION.register(self.definitions)
+        try:
+            return self._run_task(task, cfg = cfg)
+        finally:
+            # The catalogue is a frame, so a later agent in this process starts
+            # from its own tools rather than inheriting this run's pins.
+            SELECTION.release()
+
+    def _run_task(self, task: str, cfg = CONFIG) -> Result:
         self.task = task
         TRACE.configure(cfg.trace_path)
         TRACE.emit('run_start', mode = 'task', profile = cfg.profile, model = cfg.model_main,
@@ -422,11 +430,13 @@ class DeepSeekAgent:
         )
         # Every exit from the loop -- quit, EOF, a double interrupt -- closes the
         # trace here, so a REPL session does not leave the file handle open (and
-        # on Windows, locked) for the rest of the process's life.
+        # on Windows, locked) for the rest of the process's life. The tool
+        # catalogue is a frame for the same reason: it ends with the session.
         try:
             self._repl(client, cfg = cfg)
         finally:
             TRACE.close()
+            SELECTION.release()
         return
 
     def _repl(self, client: OpenAI, cfg = CONFIG) -> None:

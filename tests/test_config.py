@@ -161,6 +161,7 @@ def test_execution_defaults():
     ("MINI_HARNESS_READ_ONLY", "read_only"),
     ("MINI_HARNESS_VERIFY_REQUIRED", "verify_required"),
     ("MINI_HARNESS_RECALL", "recall_enabled"),
+    ("MINI_HARNESS_QUIET_TOOLS", "quiet_tools"),
     ("MINI_HARNESS_MCP_RISKY", "mcp_risky"),
 ])
 def test_boolean_switches_are_read_from_the_environment(monkeypatch, variable, field):

@@ -12,12 +12,12 @@ from mini_harness.tool.box import ToolDefinition
 from tests.conftest import ALWAYS_ALLOW, ALWAYS_DENY, call, executor, write
 
 
-def make_executor(cfg, confirm=ALWAYS_ALLOW, **tools):
+def make_executor(cfg, confirm=ALWAYS_ALLOW, observer=None, **tools):
     """Real file tools plus any ad-hoc tool the test adds."""
     registry = {name: t for name, t in ((t.name, t) for t in box.TOOLS)
                 if name in {"glob_file", "grep_file", "read_file", "write_file", "edit_file"}}
     registry.update(tools)
-    return box.ToolExecution(registry, confirm, cfg=cfg)
+    return box.ToolExecution(registry, confirm, cfg=cfg, observer=observer)
 
 
 def echo_tool(risky=False):
@@ -407,8 +407,117 @@ def test_thrash_notice_fires_at_the_configured_count(cfg_factory, workspace):
     assert "modified this file 2 times" in result.content
 
 
-# --------------------------------------------------------------------- registry wiring
+# --------------------------------------------------------------------- the observer seam
 
+
+class Recorder(box.ToolObserver):
+    """Records what an executor reported, and which executor said it."""
+
+    def __init__(self):
+        self.events = []
+
+    def start(self, executor, tool_call):
+        self.events.append(('start', executor, tool_call.function.name))
+
+    def end(self, executor, tool_call, result):
+        self.events.append(('end', executor, tool_call.function.name, result.ok))
+
+
+def test_an_observer_sees_the_start_and_the_end(cfg, workspace):
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    observer = Recorder()
+    runner = make_executor(cfg, observer=observer)
+
+    runner.execute_tool(call("read_file", file_path="sandbox/f.py"), cfg=cfg)
+
+    assert [(kind, name) for kind, _executor, name, *_ in observer.events] == [
+        ('start', 'read_file'), ('end', 'read_file')]
+    assert all(executor is runner for _kind, executor, *_ in observer.events)
+    assert observer.events[-1][3] is True
+
+
+def test_an_observer_reports_a_refusal_too(cfg):
+    observer = Recorder()
+    runner = make_executor(cfg, observer=observer)
+
+    runner.execute_tool(call("nope_tool"), cfg=cfg)
+
+    assert [event[0] for event in observer.events] == ['start', 'end']
+    assert observer.events[-1][3] is False
+
+
+def test_an_observer_on_one_executor_does_not_affect_another(cfg, workspace):
+    """The seam used to be a class patch, so this could not be true."""
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    watched = Recorder()
+    other = make_executor(cfg)
+
+    other.execute_tool(call("read_file", file_path="sandbox/f.py"), cfg=cfg)
+
+    assert watched.events == []
+
+
+def test_the_installed_observer_is_the_default(cfg, workspace, monkeypatch):
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    observer = Recorder()
+    monkeypatch.setattr(box, 'OBSERVER', observer)
+
+    make_executor(cfg).execute_tool(call("read_file", file_path="sandbox/f.py"), cfg=cfg)
+
+    assert len(observer.events) == 2
+
+
+def test_an_explicit_observer_overrides_the_installed_one(cfg, workspace, monkeypatch):
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    installed = Recorder()
+    monkeypatch.setattr(box, 'OBSERVER', installed)
+    mine = Recorder()
+
+    make_executor(cfg, observer=mine).execute_tool(call("read_file", file_path="sandbox/f.py"),
+                                                   cfg=cfg)
+
+    assert len(mine.events) == 2
+    assert installed.events == []
+
+
+def test_a_nested_executor_inherits_the_installed_observer(cfg, workspace, monkeypatch):
+    """Subagents build their own executor, and the transcript still shows them."""
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+    observer = Recorder()
+    monkeypatch.setattr(box, 'OBSERVER', observer)
+    registry = {"read_file": next(tool for tool in box.TOOLS if tool.name == 'read_file')}
+    nested = box.ToolExecution(registry, box._for_sub, cfg=cfg)
+
+    nested.execute_tool(call("read_file", file_path="sandbox/f.py"), cfg=cfg)
+
+    assert [event[0] for event in observer.events] == ['start', 'end']
+
+
+def test_the_default_observer_does_nothing(cfg, workspace):
+    """A run with no front end pays nothing for the seam."""
+    write(workspace / "sandbox" / "f.py", "alpha\n")
+
+    result = make_executor(cfg).execute_tool(call("read_file", file_path="sandbox/f.py"), cfg=cfg)
+
+    assert result.ok
+
+
+def test_quiet_tools_silences_the_console_copy(cfg_factory, capsys):
+    """The TUI renders the events itself; the console line would be noise."""
+    loud = cfg_factory()
+    quiet = cfg_factory(quiet_tools=True)
+    tool_call = call("read_file", file_path="sandbox/f.py")
+    item = box.ToolItem("contents", True, '')
+
+    box.log_tool(tool_call, item, cfg=loud)
+    printed = capsys.readouterr().out
+    box.log_tool(tool_call, item, cfg=quiet)
+
+    assert "read_file" in printed
+    assert capsys.readouterr().out == ""
+
+
+# --------------------------------------------------------------------- registry wiring
 
 def test_default_registry_exposes_every_built_in_tool():
     assert len(box.TOOLS) == 11

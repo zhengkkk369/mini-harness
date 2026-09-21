@@ -94,6 +94,10 @@ class Config:
     write_require_read: bool = True
     thrash_notice: int = 0
     diff_echo_lines: int = 40
+    # The console copy of each tool call. Turn it off when something else is
+    # already rendering the run -- the TUI worker, for instance, which turns the
+    # events into its own transcript.
+    quiet_tools: bool = False
 
     # Run budgets. wall_budget is seconds, token_budget counts prompt plus
     # completion tokens, cost_budget is US dollars. Cost is only tracked when
@@ -428,6 +432,7 @@ def build_config() -> Config:
                            ('MINI_HARNESS_READ_ONLY', 'read_only'),
                            ('MINI_HARNESS_VERIFY_REQUIRED', 'verify_required'),
                            ('MINI_HARNESS_RECALL', 'recall_enabled'),
+                           ('MINI_HARNESS_QUIET_TOOLS', 'quiet_tools'),
                            ('MINI_HARNESS_MCP_RISKY', 'mcp_risky')):
         if value := os.environ.get(variable):
             overrides[name] = env_flag(value, variable)

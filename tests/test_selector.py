@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mini_harness.agent import CORE_TOOLS, DeepSeekAgent
 from mini_harness.selector import SELECTION, describe, rank_definitions, select
+from mini_harness.tool import box
 from mini_harness.tool.box import TOOLS, FindToolsInput, ToolDefinition, find_tools
 from mini_harness.tool.tag import OUTCOME, TAG
 from tests.conftest import call, executor, write
@@ -132,6 +133,51 @@ def test_reset_empties_both_halves():
     assert SELECTION.active == set()
 
 
+# ------------------------------------------------------------------ frames, not a slot
+
+
+def test_a_nested_registration_restores_what_was_underneath():
+    """An inner agent must not take the outer agent's catalogue with it."""
+    SELECTION.register(FAKES)
+    SELECTION.activate(["sql_query"])
+    SELECTION.register(FAKES[:2])
+
+    assert [tool.name for tool in SELECTION.catalog] == ["browser_open", "sql_query"]
+    assert SELECTION.active == set()
+
+    SELECTION.release()
+
+    assert [tool.name for tool in SELECTION.catalog] == [tool.name for tool in FAKES]
+    assert SELECTION.active == {"sql_query"}
+
+
+def test_release_without_a_frame_is_harmless():
+    SELECTION.reset()
+
+    SELECTION.release()
+
+    assert SELECTION.catalog == []
+
+
+def test_activating_without_a_frame_pins_nothing():
+    SELECTION.reset()
+
+    SELECTION.activate(["sql_query"])
+
+    assert SELECTION.active == set()
+
+
+def test_a_pin_inside_a_frame_is_scoped_to_it():
+    SELECTION.register(TOOLS)
+    find_tools(FindToolsInput(query="search the earlier conversation", limit=1))
+    pinned = set(SELECTION.active)
+    assert pinned
+
+    SELECTION.register(TOOLS)
+
+    assert SELECTION.active == set()
+
+
 # ------------------------------------------------------------------ find_tools
 
 
@@ -154,12 +200,17 @@ def test_find_tools_respects_its_limit():
 
 
 def test_find_tools_falls_back_to_the_built_in_catalogue():
+    """With no run in progress it still reports, but there is nothing to pin.
+
+    A pin means "for the rest of this run"; outside a run there is no run to
+    outlive, and pinning into a frame nobody will release would leak.
+    """
     SELECTION.reset()
 
     report = find_tools(FindToolsInput(query="read a file"))
 
     assert f"of {len(TOOLS)} tools match" in report
-    assert SELECTION.active
+    assert SELECTION.active == set()
 
 
 def test_find_tools_pulled_in_tools_survive_the_next_selection():
@@ -172,6 +223,54 @@ def test_find_tools_pulled_in_tools_survive_the_next_selection():
 
 
 # ------------------------------------------------------------------ the hidden call
+
+
+def bridged_surface():
+    """What a bridged server's tools look like once they reach the registry."""
+    return [
+        box.ToolDefinition('fs__read_text_file', 'read the complete contents of a file from the filesystem server',
+                           Anything, lambda args, cfg=None: 'bridged read', False),
+        box.ToolDefinition('fs__write_file', 'create or overwrite a file on the filesystem server',
+                           Anything, lambda args, cfg=None: 'bridged write', True),
+        box.ToolDefinition('memory__search_nodes', 'search the knowledge graph for entities and relations',
+                           Anything, lambda args, cfg=None: 'bridged search', False),
+    ]
+
+
+def test_a_budget_takes_bridged_tools_first_not_the_core_ones(cfg_factory):
+    """The built-ins are the agent's basic capability; the bridge is the surface
+    that grows without bound, so a budget has to bite there."""
+    cfg = cfg_factory(tool_budget=6)
+    definitions = [*TOOLS, *bridged_surface()]
+    agent = DeepSeekAgent(definitions, cfg=cfg)
+    agent.task = 'search the knowledge graph for entities'
+
+    exposed = {entry['function']['name'] for entry in agent._expose(cfg)}
+
+    assert CORE_TOOLS <= exposed
+    assert 'memory__search_nodes' in exposed, 'the ranked match should earn its place'
+    assert 'fs__read_text_file' not in exposed
+    assert 'fs__write_file' not in exposed
+
+
+def test_a_hidden_bridged_tool_can_be_pulled_back_by_name(cfg):
+    """The escape hatch has to work for tools this process cannot change."""
+    definitions = [*TOOLS, *bridged_surface()]
+    registry = {tool.name: tool for tool in definitions}
+    execution = box.ToolExecution(registry, box._always_allow, cfg=cfg)
+    execution.hidden = {'fs__read_text_file'}
+    SELECTION.register(definitions)
+
+    refused = execution.execute_tool(call('fs__read_text_file'), cfg=cfg)
+    report = find_tools(box.FindToolsInput(query='read the complete contents of a file', limit=1))
+    execution.hidden = set()
+    allowed = execution.execute_tool(call('fs__read_text_file', call_id='second'), cfg=cfg)
+
+    assert refused.tag == TAG.HIDDEN_TOOL
+    assert 'fs__read_text_file' in report
+    assert 'fs__read_text_file' in SELECTION.active
+    assert allowed.ok
+    assert allowed.content == 'bridged read'
 
 
 def test_a_call_to_a_hidden_tool_is_refused_with_the_way_back(cfg):

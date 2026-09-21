@@ -71,6 +71,9 @@ def agent_worker() -> None:
         demo = request.get("demo", False)
         os.environ["MINI_HARNESS_PROFILE"] = "local"
         os.environ["MINI_HARNESS_WORK_SPACE"] = str(ROOT)
+        # The interface renders the tool events itself, so the console copy of
+        # them would only be noise in the transcript.
+        os.environ["MINI_HARNESS_QUIET_TOOLS"] = "1"
         if demo:
             os.environ["MINI_HARNESS_API_KEY"] = "offline-demo-not-a-real-key"
         sys.path.insert(0, str(ROOT / "src"))
@@ -143,23 +146,42 @@ def agent_worker() -> None:
             reply = json.loads(sys.stdin.readline() or "{}")
             return reply.get("id") == call.id and reply.get("allow") is True
 
+        class StreamObserver(box.ToolObserver):
+            """Turn tool execution into protocol events.
+
+            This used to be a wrapper assigned to `ToolExecution.execute_tool`,
+            which patched the class for the whole process -- including the
+            executors subagents make -- from a line that looked like ordinary
+            setup. An observer is the same hook with the seam visible.
+            """
+
+            def __init__(self):
+                self.top = None
+                return
+
+            def start(self, executor, tool_call):
+                if executor is self.top:
+                    agent._save_memory()
+                emit("tool_start", id=tool_call.id, name=tool_call.function.name,
+                     arguments=tool_call.function.arguments, nested=executor is not self.top)
+                return
+
+            def end(self, executor, tool_call, result):
+                emit("tool_end", id=tool_call.id, ok=result.ok, tag=result.tag,
+                     content=result.content)
+                if executor is self.top:
+                    emit("history",
+                         messages=[*agent.message, {"role": "tool", "tool_call_id": tool_call.id,
+                                                    "content": core.CLIP.clip(result.content)}],
+                         tokens=agent.last_prompt_tokens)
+                return
+
+        observer = StreamObserver()
+        # Installed as the default so a subagent's own executor reports too, which
+        # is what the transcript showed before this was an observer.
+        box.OBSERVER = observer
         executor = box.ToolExecution(agent.regis, confirm)
-        original_execute = box.ToolExecution.execute_tool
-
-        def execute(current, call, cfg=CONFIG):
-            if current is executor:
-                agent._save_memory()
-            emit("tool_start", id=call.id, name=call.function.name,
-                 arguments=call.function.arguments, nested=current is not executor)
-            result = original_execute(current, call, cfg=cfg)
-            emit("tool_end", id=call.id, ok=result.ok, tag=result.tag, content=result.content)
-            if current is executor:
-                emit("history", messages=[*agent.message, {"role": "tool", "tool_call_id": call.id,
-                     "content": core.CLIP.clip(result.content)}], tokens=agent.last_prompt_tokens)
-            return result
-
-        box.ToolExecution.execute_tool = execute
-        core.log_tool = lambda *args, **kwargs: None
+        observer.top = executor
         with contextlib.redirect_stdout(Output()), contextlib.redirect_stderr(Output()):
             with OpenAI(api_key=CONFIG.api_key, base_url=CONFIG.base_url,
                         max_retries=0, timeout=90) as client:
@@ -172,6 +194,7 @@ def agent_worker() -> None:
     except Exception as error:
         emit("error", text=f"{type(error).__name__}: {error}")
     finally:
+        box.OBSERVER = box.ToolObserver()
         if bridge is not None:
             bridge.close()
 

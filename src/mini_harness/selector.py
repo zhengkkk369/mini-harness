@@ -17,28 +17,59 @@ lexical, and a task whose wording does not resemble a tool description is
 exactly where a budget would hurt.
 """
 
+from dataclasses import dataclass, field
+
 from mini_harness.memory import rank, tokens
 
 class Selection:
-    """The full catalogue for a run, and the tools asked for by name."""
+    """The full catalogue for a run, and the tools asked for by name.
+
+    Frames rather than one slot, because more than one agent can be alive in a
+    process: the TUI worker runs the agent inside its own process, a subagent
+    runs inside the parent's, and a nested registration used to replace the
+    parent's catalogue and forget the tools it had pulled in. Each registration
+    pushes a frame and ``release`` pops it, so an inner agent's choices cannot
+    outlive the inner agent.
+    """
 
     def __init__(self) -> None:
-        self.catalog: list = []
-        self.active: set = set()
+        self.frames: list = []
         return
 
+    @property
+    def catalog(self) -> list:
+        return self.frames[-1].catalog if self.frames else []
+
+    @property
+    def active(self) -> set:
+        return self.frames[-1].active if self.frames else set()
+
     def register(self, definitions: list) -> None:
-        self.catalog = list(definitions)
-        self.active = set()
+        """Start a frame for one agent's catalogue."""
+        self.frames.append(Frame(catalog=list(definitions), active=set()))
+        return
+
+    def release(self) -> None:
+        """End the innermost frame, restoring whatever was underneath."""
+        if self.frames:
+            self.frames.pop()
         return
 
     def activate(self, names) -> None:
-        self.active.update(names)
+        """Pin tools by name for the current frame, and for it only."""
+        if self.frames:
+            self.frames[-1].active.update(names)
         return
 
     def reset(self) -> None:
-        self.catalog, self.active = [], set()
+        self.frames = []
         return
+
+
+@dataclass
+class Frame:
+    catalog: list
+    active: set
 
 SELECTION = Selection()
 

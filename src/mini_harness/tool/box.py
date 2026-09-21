@@ -157,12 +157,37 @@ class ToolItem:
     ok: bool
     tag: str = ''
 
+class ToolObserver:
+    """Callbacks around tool execution, for a front end that wants to show it.
+
+    A front end used to wrap this by assigning to ``ToolExecution.execute_tool``,
+    which patches the class for the whole process: every executor, including the
+    ones subagents create, is affected, and nothing about it is visible at the
+    call site. Attaching an observer to an executor -- or installing one here as
+    the default -- does the same job with the seam in plain sight.
+
+    The methods are no-ops, so an observer only has to implement what it needs,
+    and the executor calls them without checking.
+    """
+
+    def start(self, executor: 'ToolExecution', tool_call) -> None:
+        return
+
+    def end(self, executor: 'ToolExecution', tool_call, result: 'ToolItem') -> None:
+        return
+
+OBSERVER = ToolObserver()
+
 class ToolExecution:
-    def __init__(self, regis: dict, confirm: Callable, cfg = CONFIG, policy = None) -> None:
+    def __init__(self, regis: dict, confirm: Callable, cfg = CONFIG, policy = None,
+                 observer: ToolObserver|None = None) -> None:
         self.regis = regis
         self.confirm = confirm
         self.cfg = cfg
         self.policy = policy if policy is not None else Policy.from_config(cfg, READ_ONLY_DENIED)
+        # None means "whatever is installed as the default"; an explicit observer
+        # wins, which is what a nested executor can use to opt out.
+        self.observer = observer
         self.last_tool = None
         self.files = {}
         # Names the exposure budget kept out of the request. They stay callable
@@ -296,9 +321,12 @@ class ToolExecution:
         """Run one tool call, emitting a trace pair around every outcome."""
         name = tool_call.function.name
         started = time.time()
+        observer = self.observer if self.observer is not None else OBSERVER
         TRACE.emit('tool_call', tool = name, args = tool_call.function.arguments,
                    nested = self.confirm is _for_sub)
+        observer.start(self, tool_call)
         item = self._dispatch(tool_call, cfg = cfg)
+        observer.end(self, tool_call, item)
         TRACE.emit('tool_result', tool = name, ok = item.ok, tag = item.tag,
                    chars = len(item.content), seconds = round(time.time() - started, 4))
         return item
@@ -405,6 +433,10 @@ class ToolExecution:
         return ToolItem(raw, True, TAG.SUCCESS)
 
 def log_tool(tool_call, res: ToolItem, prefix: str = '', cfg = CONFIG) -> None:
+    if cfg.quiet_tools:
+        # A front end that renders the events itself does not want the console
+        # copy as well. This used to be a replacement of this function.
+        return
     arguments = tool_call.function.arguments
     if len(arguments) > 100:
         arguments = arguments[:100] + '\n....clipped at 100 chars'

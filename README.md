@@ -168,8 +168,7 @@ already been made and its tool calls would only be usable by a request the budge
 will refuse, the calls are answered with a `[skipped]` placeholder rather than
 run, and the pairing is kept so the session can still be resumed.
 
-Set `MINI_HARNESS_TRACE` to a path to record what the run actually did. The
-[trace](src/mini_harness/trace.py) is an append-only JSONL file, one object per
+Set `MINI_HARNESS_TRACE` to a path to record what the run actually did. The[trace](src/mini_harness/trace.py) is an append-only JSONL file, one object per
 event, with a monotonic `seq` and a `ts`: `run_start`, `turn`, `usage`,
 `tool_call`, `tool_result`, `batch_parallel`, `retry`, `compact`,
 `subagent_start`, `subagent_end`, `verify_nudge`, `budget_stop`, `run_end`. It is
@@ -179,6 +178,17 @@ keeps everything already written. A write failure disables the trace instead of
 failing the run. The bench profile writes one next to its session file. The
 session file and the compaction audit log are unchanged: the trace is for
 observing a run, not for resuming it.
+
+```sh
+export MINI_HARNESS_QUIET_TOOLS=true    # a front end renders the events instead
+```
+
+A front end that shows tool calls itself — the TUI worker, for instance — turns
+the console copy off and attaches a `ToolObserver` to the executor (or installs
+one as the default, which is how a subagent's own executor gets reported too).
+It is the same hook a wrapper around `ToolExecution.execute_tool` would give,
+with the seam visible at the call site instead of patched onto the class for the
+whole process.
 
 ## Execution policy and verification
 
