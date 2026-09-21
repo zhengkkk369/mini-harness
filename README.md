@@ -259,6 +259,13 @@ archive exists and how to search it. The journal format is unchanged and stays
 readable by [`bench/atif.py`](bench/atif.py), which reconstructs compaction
 boundaries from it.
 
+A journal entry is written **after** the session that records its removal, and
+carries `committed: true`. The order matters because the entry is what a replay
+splices the removed prefix back from: an entry describing a removal the session
+had not yet recorded would put those messages in the trajectory twice. Session
+first means an interrupted compaction leaves no entry at all, which reads as
+"nothing was removed" rather than as a corrupted conversation.
+
 ```sh
 export MINI_HARNESS_RECALL=false        # no recall tool at all
 export MINI_HARNESS_RECALL_LIMIT=10     # matches per query, default 5
@@ -513,6 +520,7 @@ uv run --locked pytest tests/test_sandbox_live.py   # the live sandbox checks, i
 | `tests/test_tools.py` | glob, grep, read, write, edit and run_bash behaviour, including the environment filter |
 | `tests/test_path.py` | read/write path guards and the sensitive-file deny list |
 | `tests/test_compact.py` | cut-point selection, the summary prompt, and the compaction audit log |
+| `tests/test_atif.py` | the trajectory builder: journal splicing, committed entries, step folding, token reconstruction |
 | `tests/test_config.py` | provider inference, environment overrides, and the bench profile |
 | `tests/test_sandbox.py` | the Docker command line, isolation flags, mount scope, and cleanup |
 | `tests/test_sandbox_live.py` | the same claims against a real engine: mount mapping, host write-back, read-only root, no network, the memory cap, timeouts, cleanup (skips without Docker or the image) |

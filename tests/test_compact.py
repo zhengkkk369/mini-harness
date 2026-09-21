@@ -184,6 +184,49 @@ def test_removed_messages_are_written_to_the_audit_log(cfg_factory, session_dir)
     assert lines[0]["ts"] > 0
 
 
+def test_the_session_is_committed_before_the_journal_entry(cfg_factory, session_dir):
+    """An entry must never describe a removal the session does not record.
+
+    A replay splices the journal's removals back in front of the session, so an
+    entry written first would duplicate those messages instead of losing them.
+    """
+    session = session_dir / "session.json"
+    cfg = cfg_factory(recent_keep=5)
+
+    result = COMPACT.compact_content(FakeClient(), conversation(user_turns=6, tool_runs=3),
+                                     session, cfg=cfg)
+
+    on_disk = json.loads(session.read_text(encoding="utf-8"))
+    assert on_disk == result
+    entry = json.loads((session_dir / "mini_harness_history.jsonl")
+                       .read_text(encoding="utf-8").splitlines()[0])
+    assert entry["committed"] is True
+    # the removal is gone from the session, which is what makes the entry safe
+    assert on_disk[1:1 + len(entry["removed"])] != entry["removed"]
+
+
+def test_an_unwritable_session_leaves_no_journal_entry(cfg_factory, session_dir):
+    """Context still shrinks, but nothing is archived without its session."""
+    cfg = cfg_factory(recent_keep=5)
+    blocked = session_dir / "as-a-directory"
+    blocked.mkdir()
+    messages = conversation(user_turns=6, tool_runs=3)
+
+    result = COMPACT.compact_content(FakeClient(), messages, blocked, cfg=cfg)
+
+    assert len(result) < len(messages)
+    assert not (session_dir / "mini_harness_history.jsonl").exists()
+
+
+def test_compaction_without_a_session_writes_no_journal(cfg_factory):
+    """unattended runs may have no session path; nothing should be archived."""
+    cfg = cfg_factory(recent_keep=5)
+
+    result = COMPACT.compact_content(FakeClient(), conversation(user_turns=6, tool_runs=3), cfg=cfg)
+
+    assert result[0]["role"] == "system"
+
+
 def test_repeated_compaction_appends_to_the_same_log(cfg_factory, session_dir):
     session = session_dir / "session.json"
     cfg = cfg_factory(recent_keep=5)

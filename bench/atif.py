@@ -70,11 +70,26 @@ def _load_history(agent_dir: Path) -> tuple[list, list]:
 
 
 def _splice(events: list, session: list) -> tuple[list, dict, list]:
+    """Put the compacted prefixes back in front of the session.
+
+    A journal entry is written only after the session that records its removal,
+    so an entry is authoritative. Older files predate the ``committed`` field,
+    and for those the only available test is whether the removal still sits at
+    the front of the session -- which is what an interrupted compaction leaves
+    behind.
+    """
     notes = []
     events = list(events)
     if events:
-        last = events[-1].get("removed") or []
-        if last and session[1 : 1 + len(last)] == last:
+        last = events[-1]
+        removed = last.get("removed") or []
+        committed = last.get("committed")
+        uncommitted = (
+            committed is False
+            if committed is not None
+            else bool(removed) and session[1 : 1 + len(removed)] == removed
+        )
+        if uncommitted:
             events.pop()
             notes.append("dropped uncommitted trailing history event")
     stream: list = []

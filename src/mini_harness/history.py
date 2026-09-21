@@ -1,4 +1,4 @@
-"""Repair a stored conversation into one an API will accept.
+"""Repair a stored conversation into one an API will accept, and write it safely.
 
 The chat API requires every ``tool_calls`` entry on an assistant message to be
 followed by a ``tool`` message carrying its id. A session saved mid-turn, or
@@ -8,9 +8,28 @@ outright rather than degraded.
 `paired_history` fills the gaps with an explicit placeholder so the conversation
 can be resumed. It lives in the package rather than in the TUI because the
 worker, the session loader and any future front end all need the same repair.
+
+`atomic_write` lives here too, because a session is written from more than one
+place -- the agent after every step, and compaction once it has replaced the
+prefix it is about to archive -- and they must all produce the same file.
 """
 
+import os
+
+from pathlib import Path
+
 PLACEHOLDER = '[interrupted] No result received. Check current files before retrying.'
+
+def atomic_write(file_path: Path, content: str) -> None:
+    """Replace a file in one step, or leave the old one untouched."""
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents = True, exist_ok = True)
+    temp = file_path.with_name(file_path.name + '.tmp')
+    try:
+        temp.write_text(content, errors = 'replace', encoding = 'utf-8')
+        os.replace(temp, file_path)
+    finally:
+        temp.unlink(missing_ok = True)
 
 def paired_history(messages: list) -> list:
     """Return a copy with a placeholder result for every unanswered tool call.

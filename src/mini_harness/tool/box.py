@@ -22,6 +22,7 @@ from openai import OpenAI
 from mini_harness.config import CONFIG
 from mini_harness.budget import ACCOUNT, SOURCE_SUBAGENT
 from mini_harness.embed import build_embedder
+from mini_harness.history import atomic_write as _atomic_write
 from mini_harness.memory import Memory, journal_path
 from mini_harness.policy import Policy, DENY
 from mini_harness.selector import SELECTION, rank_definitions
@@ -99,15 +100,6 @@ def _render_lines(val_path: Path, offset: int|None, limit: int|None, cfg = CONFI
 
     return body, reach_end
         
-def _atomic_write(file_path: Path, content: str) -> None:
-    file_path.parent.mkdir(parents = True, exist_ok=True)
-    temp = file_path.with_name(file_path.name + '.tmp')
-    try:
-        temp.write_text(content, errors = 'replace', encoding = 'utf-8')
-        os.replace(temp, file_path)
-    finally:
-        temp.unlink(missing_ok=True)
-
 def _strip_line_no(content: str) -> str:
     lines = _split_lines(content)
     if not lines:

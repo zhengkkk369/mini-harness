@@ -11,7 +11,8 @@ from mini_harness.budget import ACCOUNT, Budget, STOP_WALL, cached_tokens, SOURC
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
 from mini_harness.compact import COMPACT
-from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, _atomic_write, log_tool, WRITE_TOOLS
+from mini_harness.tool.box import _ask_human, _always_allow, ToolExecution, _to_api_tool, log_tool, WRITE_TOOLS
+from mini_harness.history import atomic_write
 from mini_harness.selector import SELECTION, select
 from mini_harness.tool.tag import OUTCOME, MARK
 from mini_harness.tool.block import CLIP
@@ -102,7 +103,7 @@ class DeepSeekAgent:
     def _save_memory(self, quiet: bool = False,  cfg = CONFIG) -> None:
         try:
             data = json.dumps(self.message, indent = 2, ensure_ascii=False)
-            _atomic_write(Path(self.session_memory), data)
+            atomic_write(Path(self.session_memory), data)
         except (TypeError, ValueError, OSError) as e:
             print(f'[save failed]: cannot save the memory: {e}')
             return
@@ -405,7 +406,7 @@ class DeepSeekAgent:
         if path:
             try:
                 p = Path(path)
-                _atomic_write(p, json.dumps(payload, indent=2, ensure_ascii=False))
+                atomic_write(p, json.dumps(payload, indent=2, ensure_ascii=False))
             except OSError as e:
                 print(f'[dump failed]: {e}')
         return

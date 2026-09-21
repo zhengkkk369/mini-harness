@@ -6,6 +6,7 @@ from openai import OpenAI
 
 from mini_harness.config import CONFIG
 from mini_harness.budget import ACCOUNT, SOURCE_COMPACT
+from mini_harness.history import atomic_write
 from mini_harness.memory import journal_for
 from mini_harness.trace import TRACE
 from mini_harness.retry_request import retry_call
@@ -81,6 +82,33 @@ Please summarize those conversation history into a working summary report, follo
             *message[cut:]
         ]
 
+    def _commit(self, session_path, message_new: list, old: list, cfg = CONFIG) -> None:
+        """Write the session, then the journal entry that points at it.
+
+        The journal is append-only and is what a replay reads to put the removed
+        prefix back, so it must never describe a removal the session has not
+        recorded: a reader would splice those messages in a second time. Writing
+        the session first makes an interrupted compaction harmless -- the entry
+        is simply missing, and the next compaction writes its own.
+
+        Both writes are best effort: a compaction that cannot record its own
+        audit trail should still shrink the context.
+        """
+        try:
+            atomic_write(Path(session_path),
+                         json.dumps(message_new, indent = 2, ensure_ascii = False))
+        except OSError as e:
+            print(f'[compact content]: session not written: {type(e).__name__}: {e}')
+            return
+        try:
+            history = journal_for(session_path, cfg = cfg)
+            with open(history, 'a', encoding = 'utf-8') as f:
+                f.write(json.dumps({'ts': time.time(), 'removed': old, 'committed': True},
+                                   ensure_ascii = False) + '\n')
+        except OSError as e:
+            print(f'[compact content]: history dump failed: {type(e).__name__}: {e}')
+        return
+
     def compact_content(self, client: OpenAI, message: list, session_path: str|Path|None = None,  cfg = CONFIG) -> list:
         cut = self._get_cut(message, cfg = cfg)
         if cut <= 1:
@@ -92,14 +120,15 @@ Please summarize those conversation history into a working summary report, follo
         try:
             response, usage = retry_call(lambda: self._request_agent(client, user_prompt, cfg = cfg),
                                         cfg = cfg)
-            if session_path is not None:
-                try:
-                    hist = journal_for(session_path, cfg = cfg)
-                    with open(hist, 'a', encoding = 'utf-8') as f:
-                        f.write(json.dumps({'ts': time.time(), 'removed': old}, ensure_ascii=False) + '\n')
-                except Exception as e:
-                    print(f'[compact content]: history dump failed: {type(e).__name__}: {e}')
             message_new = self._compact_text(cut, response, message, cfg = cfg)
+            if session_path is not None:
+                # Commit the session before the entry that describes it. The
+                # journal is what a replay splices the conversation back from, so
+                # an entry for a removal the session has not recorded would
+                # duplicate those messages rather than lose them. Session first
+                # means a crash between the two leaves an entry with no removal,
+                # which is a no-op on replay.
+                self._commit(session_path, message_new, old, cfg = cfg)
         except Exception as e:
             print(f'[compact content]: compact failed: {type(e).__name__}: {e}, skip this round')
             TRACE.emit('compact', removed = len(old), kept = len(message) - cut, ok = False,
