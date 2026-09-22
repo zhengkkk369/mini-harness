@@ -47,6 +47,7 @@ class Budget:
     completion_tokens: int = 0
     cached_tokens: int = 0
     cost: float = 0.0
+    uncached_cost: float = 0.0
     _lock: threading.Lock = field(default_factory = threading.Lock, repr = False, compare = False)
 
     @property
@@ -86,6 +87,11 @@ class Budget:
                 self.cost += (prompt - cached) / PER_MILLION * self.price_in
                 self.cost += cached / PER_MILLION * cached_price
                 self.cost += completion / PER_MILLION * self.price_out
+                # What the same usage would have cost with no cache discount at
+                # all. Kept so a quoted figure can say which rate it used: the
+                # difference is what a misconfigured price would have shown.
+                self.uncached_cost += prompt / PER_MILLION * self.price_in
+                self.uncached_cost += completion / PER_MILLION * self.price_out
         return
 
     def exceeded(self) -> str|None:

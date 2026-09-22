@@ -3,6 +3,11 @@
 .env.*
 .venv/
 venv/
+# A local config that carries credentials must never be committed: it holds an
+# API key by design, and the repository's own settings all come from the
+# environment (`MINI_HARNESS_*`), so nothing here needs this file to run.
+config.yaml
+config.local.yaml
 
 # Python and tooling caches
 __pycache__/

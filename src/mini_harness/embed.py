@@ -34,6 +34,15 @@ from mini_harness.config import CONFIG
 
 HASH_DIM = 256
 TOKEN = re.compile(r'[A-Za-z0-9_]+')
+# An error that means "this provider takes fewer inputs per request than you sent".
+# Deliberately narrow: a bad key or a missing model must not be retried as a
+# hundred tiny requests.
+BATCH_LIMIT = re.compile(r'batch|too many|too large|maximum|at most', re.IGNORECASE)
+# Most such errors state the ceiling ("should not be larger than 10"), and using
+# it beats halving: halving 5 against a ceiling of 2 lands on 1 and pays twice
+# the requests for the rest of the call.
+STATED_LIMIT = re.compile(
+    r'not be larger than\s+(\d+)|maximum (?:of |is )?(\d+)|at most\s+(\d+)', re.IGNORECASE)
 
 class Embedder:
     """A cache and a batch boundary in front of a provider's embed call."""
@@ -126,23 +135,71 @@ class OpenAIEmbedder(Embedder):
     DeepSeek API has no embeddings route, so vector recall needs
     ``embed_base_url`` (and usually ``embed_api_key``) pointed at a provider
     that does.
+
+    Providers do not agree on how many inputs one request may carry, and they do
+    not advertise it either. The first endpoint this ran against, a
+    ``text-embedding-v4`` deployment, refused anything above ten with a 400
+    naming the batch. A cap is the provider's business, so a rejected chunk is
+    halved and the smaller size is kept for the rest of the call (see
+    ``_embed_chunk``); ``requests`` counts what that actually cost.
     """
 
     def __init__(self, model: str, api_key: str, base_url: str, batch: int = 96,
                  client = None) -> None:
         super().__init__(model)
         self.batch = max(1, batch)
+        self.requests = 0
         self.client = client if client is not None else OpenAI(
             api_key = api_key, base_url = base_url or None, max_retries = 0)
 
     def _embed_many(self, texts: list) -> list:
+        """One vector per text, in order.
+
+        The consumption is a while loop rather than a `range` over `self.batch`,
+        because `self.batch` can shrink *inside* the loop when a provider rejects
+        a chunk: a precomputed stride then slices past texts that were never
+        embedded, which is a missing cache entry and a `KeyError` later in the
+        run. A chunk that was accepted whole -- or split internally and accepted
+        in pieces -- covers exactly its own inputs.
+        """
         vectors = []
-        for start in range(0, len(texts), self.batch):
-            chunk = texts[start:start + self.batch]
-            response = self.client.embeddings.create(model = self.model, input = chunk)
-            ordered = sorted(response.data, key = lambda item: item.index)
-            vectors.extend([list(item.embedding) for item in ordered])
+        pending = list(texts)
+        while pending:
+            chunk = pending[:self.batch]
+            vectors.extend(self._embed_chunk(chunk))
+            pending = pending[len(chunk):]
         return vectors
+
+    def _embed_chunk(self, chunk: list) -> list:
+        """One request, split when the provider caps the batch lower.
+
+        Only an error that names a size or batch problem is treated this way: any
+        other failure (a bad key, a missing model, a rate limit) has to surface
+        rather than be retried as a hundred tiny requests. The ceiling the error
+        states is used when it states one, and the chunk is halved when it does
+        not.
+        """
+        try:
+            response = self.client.embeddings.create(model = self.model, input = chunk)
+            self.requests += 1
+        except Exception as error:
+            if len(chunk) == 1 or not BATCH_LIMIT.search(str(error)):
+                raise
+            self.batch = min(self.batch, self._smaller(chunk, error))
+            return self._embed_chunk(chunk[:self.batch]) + self._embed_chunk(chunk[self.batch:])
+        ordered = sorted(response.data, key = lambda item: item.index)
+        return [list(item.embedding) for item in ordered]
+
+    @staticmethod
+    def _smaller(chunk: list, error: Exception) -> int:
+        """The smaller batch size to retry with, from the error or by halving."""
+        stated = [int(value) for group in STATED_LIMIT.findall(str(error)) for value in group if value]
+        if stated and 0 < min(stated) < len(chunk):
+            return min(stated)
+        return max(1, len(chunk) // 2)
+
+    def describe(self) -> dict:
+        return {**super().describe(), 'embed_requests': self.requests}
 
 def build_embedder(cfg = CONFIG):
     """The embedder for this configuration, or ``None`` for lexical recall.

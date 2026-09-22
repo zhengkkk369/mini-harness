@@ -148,9 +148,9 @@ are denied by policy.
 | passed | 8/8 |
 | nudges fired | **8 — exactly one per run** |
 | `verified` | `0/2` on every task |
-| median turns | 9 |
-| total tokens | 435,474 |
-| cost | $0.0181 |
+| median turns | 11 |
+| total tokens | 497,446 |
+| cost | $0.0210 |
 
 - **It fires under its precondition.** With verification impossible, every run
   stopped unverified and every run was nudged.
@@ -306,29 +306,33 @@ resolves to:
 | input, cache miss | $0.15 | $0.30 |
 | output | $0.60 | $1.20 |
 
-The runs happened on a Sunday evening UTC, which is off-peak. Of the 412,099
-input tokens the eight priced runs sent, **392,832 came from the cache — 95.3%**.
+The runs happened on a Sunday evening UTC, which is off-peak. Of the 470,864
+input tokens the eight priced runs sent, **445,952 came from the cache — 94.7%**.
 That is expected rather than surprising: every turn resends the same system
 prompt and tool schemas.
 
-One input price cannot express that. `Budget` now takes an optional
-`price_cache_in` and splits the prompt, and the trace carries the per-turn cached
-count. Without the split those eight runs look like $0.0758 instead of $0.0181 —
-an overstatement of **4.2x**.
+One input price cannot express that. `Budget` takes an optional `price_cache_in`
+and splits the prompt, and each run records the split: the artifact carries the
+prompt, completion and cached counts per run, so the figure can be re-derived
+rather than trusted. Without the split those eight runs look like **$0.0866**
+instead of **$0.0210** — an overstatement of **4.12x**, and `MINI_BENCH_PRICED.json`
+records both numbers per run (`cost` and `cost_naive`).
 
 Pricing stays optional: unset means cost is zero, and setting
 `price_in`/`price_out` without `price_cache_in` bills cached input at the full
 rate, which is an upper bound rather than an undercount.
 
-**Accounting basis, and what changed.** The dollar and token figures recorded in
-this document were produced when the ledger only saw the main loop's turns. The
-compaction summariser and any subagent made their own requests that no budget and
-no reported total accounted for. `ACCOUNT` now bills every model call
-(`Result.usage_by_source` splits them by `main` / `compact` / `subagent:<type>`),
-so **a re-run of these experiments would report higher token and cost figures for
-the same work** — the runs above used no subagents and compacted rarely, so the
-gap should be small, but the numbers are not directly comparable across that
-change.
+**Accounting basis: this run is the one that had to be re-recorded.** The dollar
+and token figures elsewhere in this document were produced when the ledger only
+saw the main loop's turns; the compaction summariser and any subagent made
+requests that no budget and no reported total accounted for. `ACCOUNT` now bills
+every model call and `Result.usage_by_source` splits them, and this priced run was
+repeated afterwards — which turned out to matter, because **one of its eight runs
+used a subagent**. The ledger attributes 82 calls / 489,460 tokens to `main` and
+3 calls / 7,986 tokens to `subagent:coding_agent` (1.6% of the tokens in the
+batch); the previous accounting had no line for the second row at all, and no way
+to notice it existed. The figures for the other tiers in this document predate
+that change and are not directly comparable to a re-run.
 
 ## 3. The MCP bridge, against a real server
 
@@ -516,6 +520,61 @@ not be read as a regression against it. Nothing here is comparable to it: same
 model name, but a different source revision, a different day, and one sampled
 task instead of 500.
 
+## 5. Retrieval quality, against a real embedding model
+
+Everything else in this repository is measured offline, and the vector backends
+had to be measured against a token-hashing stand-in — which is a weaker *lexical*
+scorer, so it could not answer the question the vector backend exists for: does
+an embedding model match a query to an archived message that says the same thing
+in different words? That needed a provider. One was pointed at, and
+`bench/embed_quality.py` recorded it in
+[EMBED_QUALITY.json](EMBED_QUALITY.json): `text-embedding-v4` over an
+OpenAI-compatible endpoint, six paraphrase queries (each query and the fact that
+answers it share no content word), distractors that share vocabulary with the
+queries, at three archive sizes.
+
+| archived | backend | model | top-1 | top-3 | embed calls | requests | cold (ms) | warm query (ms) |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 56 | lexical | none | 1/6 | 2/6 | 0 | 0 | 6.42 | 1.75 |
+| 56 | vector | text-embedding-v4 | 4/6 | 5/6 | 7 | 12 | 8001.05 | 187.42 |
+| 56 | hybrid | text-embedding-v4 | 4/6 | 5/6 | 7 | 12 | 3976.82 | 217.73 |
+| 206 | lexical | none | 1/6 | 2/6 | 0 | 0 | 32.72 | 3.14 |
+| 206 | vector | text-embedding-v4 | 3/6 | 4/6 | 7 | 27 | 11099.10 | 327.37 |
+| 206 | hybrid | text-embedding-v4 | 3/6 | 3/6 | 7 | 27 | 11479.54 | 277.70 |
+| 806 | lexical | none | 1/6 | 2/6 | 0 | 0 | 76.42 | 11.80 |
+| 806 | vector | text-embedding-v4 | 3/6 | 3/6 | 7 | 87 | 30459.54 | 449.31 |
+| 806 | hybrid | text-embedding-v4 | 3/6 | 3/6 | 7 | 87 | 33076.67 | 394.81 |
+
+Reading it:
+
+- **The class of miss the backend exists for is real, and embeddings close it.**
+  Lexical scoring finds 1 of 6 paraphrase queries at every size; the embedding
+  model finds 3–4. That gap is larger than the corpus's resolution, and it is the
+  first measurement here that says anything positive about vector recall.
+- **Six queries is a small instrument, and one query is 17 points.** The
+  difference between 4/6 at 56 entries and 3/6 at 206 and 806 is *one query* —
+  do not read it as "quality degrades with archive size". The lexical row is flat
+  at 1/6, and the vector row never falls to it.
+- **Fusion did not beat the better half.** `hybrid` (reciprocal rank fusion)
+  equals `vector` at 56 entries, has a worse top-3 at 206, and equals it at 806.
+  RRF is the safe default because it cannot do worse than its inputs *in
+  expectation*, but on this corpus it bought nothing.
+- **What it costs.** Embedding the archive is a cold-start cost of 8 s (56
+  texts), 11 s (206) and 30 s (806) — 12, 27 and 87 requests, because that
+  provider accepts at most ten inputs per request and the embedder discovers that
+  from the error rather than being configured with it. A warm query then costs
+  187–449 ms against 1.75–11.8 ms for lexical: roughly two orders of magnitude,
+  plus sending the archive — the text compaction removed — to a third party.
+  `embed calls` stays at 7 (one archive pass plus six queries) at every size: the
+  vectors are cached per text for the process.
+- **The cache is what makes this affordable.** Only the cold column scales with
+  the archive; the queries themselves are one embedding each. `recall` is a tool
+  the model calls occasionally, not a per-turn cost.
+
+What this still does not measure: whether retrieval *helps the agent solve a
+task*. That is a task-level question, and this suite cannot rank configurations
+(section 2).
+
 ## Limitations
 
 - **Ceiling effect.** The mini suite is eighteen tasks, and the model solved
@@ -569,7 +628,9 @@ task instead of 500.
 ```sh
 uv run python -m bench.mini_bench                 # default configs, writes MINI_BENCH.json
 uv run python -m bench.mini_bench --repeats 2     # repeat every cell
-uv run python -m bench.mini_bench --only unverifiable --price-in 0.15 \
+uv run python -m bench.mini_bench --only unverifiable --tasks inclusive_bounds \
+    --tasks normalize_whitespace --tasks numeric_ids --tasks pure_add_item --repeats 2 \
+    --out MINI_BENCH_PRICED.json --price-in 0.15 \
     --price-out 0.60 --price-cache-in 0.003       # the priced run above
 uv run python -m bench.mini_bench --tasks rolling_window --tasks round_half_up \
     --tasks sample_variance --only baseline --only no_verify --repeats 5 \
@@ -578,6 +639,8 @@ uv run python -m bench.mini_bench --tasks rolling_window --tasks round_half_up \
 uv run python -m bench.mini_bench --tasks split_cents --only baseline --only no_verify \
     --repeats 6 --out MINI_BENCH_NUDGE.json --price-in 0.15 --price-out 0.60 \
     --price-cache-in 0.003                        # the task built for the nudge
+uv run python -m bench.embed_quality --distractors 50 200 800 \
+    --out EMBED_QUALITY.json                      # section 5, needs an embeddings provider
 ```
 
 The task definitions are also covered offline, without a model:

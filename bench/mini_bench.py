@@ -805,6 +805,15 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         'prompt_tokens': result.prompt_total,
         'completion_tokens': result.completion_total,
         'cost': round(result.cost, 6),
+        # The cost above is only meaningful with its cache split beside it: the
+        # same eight priced runs read as $0.0866 instead of $0.0210 when cached
+        # input is billed at the miss rate, and `cost_naive` is that second
+        # figure. The by-source breakdown is what shows whether a run billed
+        # anything besides its main loop -- subagents and compaction go through
+        # the same account.
+        'cached_tokens': result.cached_total,
+        'cost_naive': round(result.cost_naive, 6),
+        'usage_by_source': result.usage_by_source,
         'verified': result.verified,
         'mutations': result.mutations,
         'nudges': counts.get('verify_nudge', 0),

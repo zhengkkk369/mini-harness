@@ -3,132 +3,210 @@
     "task": "normalize_whitespace",
     "config": "unverifiable",
     "repeat": 0,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
     "turns": 9,
-    "calls": 8,
+    "calls": 11,
     "errors_by_tag": {
       "policy_denied": 4
     },
-    "prompt_tokens": 45032,
-    "completion_tokens": 1986,
-    "cost": 0.001662,
+    "prompt_tokens": 50034,
+    "completion_tokens": 2871,
+    "cost": 0.002191,
+    "cached_tokens": 47872,
+    "cost_naive": 0.009228,
+    "usage_by_source": {
+      "main": {
+        "calls": 9,
+        "prompt": 50034,
+        "completion": 2871
+      }
+    },
     "verified": false,
-    "mutations": 1,
+    "mutations": 2,
     "nudges": 1,
-    "parallel_batches": 1,
-    "seconds": 14.8
+    "parallel_batches": 2,
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 24.8
   },
   {
     "task": "normalize_whitespace",
     "config": "unverifiable",
     "repeat": 1,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
-    "turns": 9,
-    "calls": 9,
+    "turns": 12,
+    "calls": 12,
     "errors_by_tag": {
-      "policy_denied": 3
+      "policy_denied": 4
     },
-    "prompt_tokens": 51881,
-    "completion_tokens": 4281,
-    "cost": 0.003069,
+    "prompt_tokens": 81174,
+    "completion_tokens": 5840,
+    "cost": 0.004428,
+    "cached_tokens": 76544,
+    "cost_naive": 0.01568,
+    "usage_by_source": {
+      "main": {
+        "calls": 12,
+        "prompt": 74805,
+        "completion": 4223
+      },
+      "subagent:coding_agent": {
+        "calls": 3,
+        "prompt": 6369,
+        "completion": 1617
+      }
+    },
     "verified": false,
-    "mutations": 1,
+    "mutations": 2,
     "nudges": 1,
-    "parallel_batches": 2,
-    "seconds": 21.2
+    "parallel_batches": 1,
+    "subagents": 1,
+    "subagent_failures": [],
+    "seconds": 38.2
   },
   {
     "task": "inclusive_bounds",
     "config": "unverifiable",
     "repeat": 0,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
-    "turns": 9,
-    "calls": 9,
+    "turns": 11,
+    "calls": 10,
     "errors_by_tag": {
       "policy_denied": 4
     },
-    "prompt_tokens": 44232,
-    "completion_tokens": 2446,
-    "cost": 0.001874,
+    "prompt_tokens": 59751,
+    "completion_tokens": 2619,
+    "cost": 0.002067,
+    "cached_tokens": 57600,
+    "cost_naive": 0.010534,
+    "usage_by_source": {
+      "main": {
+        "calls": 11,
+        "prompt": 59751,
+        "completion": 2619
+      }
+    },
     "verified": false,
     "mutations": 1,
     "nudges": 1,
     "parallel_batches": 1,
-    "seconds": 14.6
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 19.4
   },
   {
     "task": "inclusive_bounds",
     "config": "unverifiable",
     "repeat": 1,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
     "turns": 9,
-    "calls": 9,
+    "calls": 8,
     "errors_by_tag": {
-      "policy_denied": 4
+      "policy_denied": 3
     },
-    "prompt_tokens": 46587,
-    "completion_tokens": 2791,
-    "cost": 0.002096,
+    "prompt_tokens": 48214,
+    "completion_tokens": 3039,
+    "cost": 0.002244,
+    "cached_tokens": 46336,
+    "cost_naive": 0.009055,
+    "usage_by_source": {
+      "main": {
+        "calls": 9,
+        "prompt": 48214,
+        "completion": 3039
+      }
+    },
     "verified": false,
     "mutations": 1,
     "nudges": 1,
     "parallel_batches": 1,
-    "seconds": 15.5
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 19.7
   },
   {
     "task": "pure_add_item",
     "config": "unverifiable",
     "repeat": 0,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
-    "turns": 10,
-    "calls": 8,
+    "turns": 11,
+    "calls": 9,
     "errors_by_tag": {
       "policy_denied": 4
     },
-    "prompt_tokens": 48066,
-    "completion_tokens": 1848,
-    "cost": 0.001601,
+    "prompt_tokens": 53568,
+    "completion_tokens": 1749,
+    "cost": 0.001539,
+    "cached_tokens": 51328,
+    "cost_naive": 0.009085,
+    "usage_by_source": {
+      "main": {
+        "calls": 11,
+        "prompt": 53568,
+        "completion": 1749
+      }
+    },
     "verified": false,
     "mutations": 2,
     "nudges": 1,
     "parallel_batches": 0,
-    "seconds": 12.8
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 17.3
   },
   {
     "task": "pure_add_item",
     "config": "unverifiable",
     "repeat": 1,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
-    "turns": 12,
-    "calls": 12,
+    "turns": 10,
+    "calls": 9,
     "errors_by_tag": {
       "policy_denied": 4
     },
-    "prompt_tokens": 64579,
-    "completion_tokens": 3376,
-    "cost": 0.002662,
+    "prompt_tokens": 51776,
+    "completion_tokens": 2267,
+    "cost": 0.001882,
+    "cached_tokens": 49280,
+    "cost_naive": 0.009127,
+    "usage_by_source": {
+      "main": {
+        "calls": 10,
+        "prompt": 51776,
+        "completion": 2267
+      }
+    },
     "verified": false,
-    "mutations": 2,
+    "mutations": 1,
     "nudges": 1,
-    "parallel_batches": 2,
-    "seconds": 26.9
+    "parallel_batches": 0,
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 17.3
   },
   {
     "task": "numeric_ids",
     "config": "unverifiable",
     "repeat": 0,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
@@ -137,34 +215,58 @@
     "errors_by_tag": {
       "policy_denied": 4
     },
-    "prompt_tokens": 41578,
-    "completion_tokens": 2621,
-    "cost": 0.001995,
+    "prompt_tokens": 53343,
+    "completion_tokens": 3962,
+    "cost": 0.002815,
+    "cached_tokens": 51456,
+    "cost_naive": 0.010379,
+    "usage_by_source": {
+      "main": {
+        "calls": 9,
+        "prompt": 53343,
+        "completion": 3962
+      }
+    },
     "verified": false,
     "mutations": 1,
     "nudges": 1,
     "parallel_batches": 1,
-    "seconds": 15.3
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 22.3
   },
   {
     "task": "numeric_ids",
     "config": "unverifiable",
     "repeat": 1,
+    "model": "deepseek-flash",
     "passed": true,
     "detail": "exit=0 out='ok'",
     "outcome": "completed",
-    "turns": 12,
+    "turns": 11,
     "calls": 12,
     "errors_by_tag": {
+      "exists": 1,
       "policy_denied": 4
     },
-    "prompt_tokens": 70144,
-    "completion_tokens": 4026,
-    "cost": 0.003134,
+    "prompt_tokens": 73004,
+    "completion_tokens": 4235,
+    "cost": 0.003858,
+    "cached_tokens": 65536,
+    "cost_naive": 0.013492,
+    "usage_by_source": {
+      "main": {
+        "calls": 11,
+        "prompt": 73004,
+        "completion": 4235
+      }
+    },
     "verified": false,
-    "mutations": 4,
+    "mutations": 2,
     "nudges": 1,
     "parallel_batches": 1,
-    "seconds": 23.0
+    "subagents": 0,
+    "subagent_failures": [],
+    "seconds": 27.2
   }
 ]

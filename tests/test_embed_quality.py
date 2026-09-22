@@ -90,11 +90,29 @@ def test_measuring_the_same_thing_twice_gives_the_same_answer():
            [(row['backend'], row['top1'], row['top3']) for row in second]
 
 
+def test_the_first_query_is_reported_separately_from_the_rest():
+    """One median over six samples would report the cold start as a query cost.
+
+    The first query embeds the whole archive; every later one embeds the query
+    alone and reads cached vectors.
+    """
+    rows = embed_quality.measure(Config(), count=50, offline=True)
+
+    for row in rows:
+        assert row['cold_ms'] >= 0
+        assert row['warm_median_ms'] >= 0
+        assert row['median_ms'] >= 0
+
+
+def scenario(rows, **overrides):
+    return {'distractors': overrides.pop('distractors', 10), 'rows': rows}
+
+
 # ------------------------------------------------------------------ labelling
 
 
 def test_an_offline_run_says_the_numbers_are_the_stand_in():
-    report = embed_quality.render(embed_quality.measure(Config(), count=10, offline=True),
+    report = embed_quality.render([scenario(embed_quality.measure(Config(), count=10, offline=True))],
                                   offline=True, cost_note='no provider')
 
     assert 'stand-in' in report
@@ -102,7 +120,7 @@ def test_an_offline_run_says_the_numbers_are_the_stand_in():
 
 
 def test_a_provider_run_does_not_claim_to_be_offline():
-    report = embed_quality.render(embed_quality.measure(Config(), count=10, offline=True),
+    report = embed_quality.render([scenario(embed_quality.measure(Config(), count=10, offline=True))],
                                   offline=False, cost_note='provider: https://embed.test')
 
     assert 'stand-in' not in report
@@ -110,11 +128,31 @@ def test_a_provider_run_does_not_claim_to_be_offline():
 
 
 def test_the_report_has_a_row_per_backend():
-    report = embed_quality.render(embed_quality.measure(Config(), count=10, offline=True),
+    report = embed_quality.render([scenario(embed_quality.measure(Config(), count=10, offline=True))],
                                   offline=True, cost_note='x')
 
     for backend in embed_quality.BACKENDS:
         assert f'| {backend} |' in report
+
+
+def test_every_measured_archive_size_gets_its_own_rows():
+    report = embed_quality.render(
+        [scenario(embed_quality.measure(Config(), count=10, offline=True), distractors=10),
+         scenario(embed_quality.measure(Config(), count=60, offline=True), distractors=60)],
+        offline=True, cost_note='x')
+
+    assert f"| {10 + len(embed_quality.PARAPHRASES)} | lexical |" in report
+    assert f"| {60 + len(embed_quality.PARAPHRASES)} | lexical |" in report
+
+
+def test_the_report_carries_the_request_count_beside_the_call_count():
+    """A provider bills requests, and the batch ceiling decides how many."""
+    rows = embed_quality.measure(Config(), count=10, offline=True)
+    report = embed_quality.render([scenario(rows)], offline=True, cost_note='x')
+    header = [line for line in report.splitlines() if line.startswith('| archived')][0]
+
+    assert 'requests' in header
+    assert all('provider_requests' in row for row in rows)
 
 
 # ------------------------------------------------------------------ the provider
@@ -131,9 +169,63 @@ def test_a_configured_provider_is_detected(cfg_factory):
 
 
 def test_the_environment_can_configure_the_provider(monkeypatch, cfg_factory):
-    monkeypatch.setenv('MINI_HARNESS_EMBED_BASE_URL', 'https://embed.test/v1')
+    """The documented command has to reach the embedder, not only the report.
 
-    assert embed_quality.provider_configured(cfg_factory(embed_base_url='')) is True
+    The first version built its configuration with a bare `Config()`, so
+    `provider_configured` saw the environment variable and said "online" while
+    the embedder was constructed with the embedding fields still empty -- which
+    pointed it at the main model's base_url. This asserts the whole path.
+    """
+    from mini_harness.config import build_config
+    from mini_harness.embed import OpenAIEmbedder
+
+    monkeypatch.setenv('MINI_HARNESS_EMBED_BASE_URL', 'https://embed.test/v1')
+    monkeypatch.setenv('MINI_HARNESS_EMBED_API_KEY', 'embed-key')
+    monkeypatch.setenv('MINI_HARNESS_EMBED_MODEL', 'embed-small')
+
+    seen = {}
+
+    def fake_openai(**kwargs):
+        seen.update(kwargs)
+        return type('C', (), {'embeddings': type('E', (), {
+            'create': lambda self, **_: type('R', (), {'data': []})()})()})()
+
+    monkeypatch.setattr('mini_harness.embed.OpenAI', fake_openai)
+    cfg = build_config()
+
+    assert embed_quality.provider_configured(cfg) is True
+    embedder = embed_quality.embedder_for('vector', cfg, offline=False)
+
+    assert isinstance(embedder, OpenAIEmbedder)
+    assert seen['base_url'] == 'https://embed.test/v1'
+    assert seen['api_key'] == 'embed-key'
+    assert embedder.model == 'embed-small'
+
+
+def test_a_local_config_file_can_configure_the_provider(monkeypatch, tmp_path):
+    """The same path, configured the other way this tool supports."""
+    from mini_harness.config import build_config
+
+    path = tmp_path / 'config.yaml'
+    path.write_text('embedding:\n  base_url: "https://embed.local/v1"\n'
+                    '  model_name: "text-embedding-local"\n  api_key: "local-key"\n',
+                    encoding='utf-8')
+    monkeypatch.setenv('MINI_HARNESS_CONFIG_FILE', str(path))
+    cfg = build_config()
+
+    assert embed_quality.provider_configured(cfg) is True
+    assert cfg.embed_base_url == 'https://embed.local/v1'
+    assert cfg.embed_model == 'text-embedding-local'
+
+
+def test_an_absent_local_file_means_no_provider(monkeypatch, tmp_path):
+    from mini_harness.config import build_config
+
+    monkeypatch.setenv('MINI_HARNESS_CONFIG_FILE', str(tmp_path / 'absent.yaml'))
+    cfg = build_config()
+
+    assert embed_quality.provider_configured(cfg) is False
+    assert embed_quality.measure(cfg, backends = ('lexical',), count = 0, offline = True)
 
 
 def test_a_provider_run_builds_a_real_embedder(cfg_factory, monkeypatch):

@@ -54,6 +54,50 @@ def env_list(value: str) -> tuple:
 # 'hybrid' call an embeddings endpoint.
 RECALL_BACKENDS = frozenset({'lexical', 'hash', 'vector', 'hybrid'})
 
+# A local `config.yaml` may carry the embedding settings, so a real endpoint can
+# be pointed at without exporting variables. It is read for nothing else -- every
+# other setting comes from the environment -- and it is gitignored, because it
+# holds a key. Three rules keep it from becoming a second, hidden source of
+# configuration: the environment always wins, the bench profile ignores it
+# entirely (a bench run has to be reproducible from its command line alone), and
+# the key never reaches a log or a trace.
+LOCAL_CONFIG = 'config.yaml'
+EMBED_KEYS = {
+    'api_key': 'embed_api_key',
+    'base_url': 'embed_base_url',
+    'model': 'embed_model',
+    'model_name': 'embed_model',
+}
+
+def local_embedding(path: str|Path|None = None) -> dict:
+    """The embedding settings in the local config file, or {} if there are none.
+
+    The format is the flat `key: value` shape this repository already parses for
+    skills: a top-level `embedding:` block with indented entries under it, `#`
+    comments ignored. Three values do not justify a YAML dependency.
+    """
+    path = Path(os.environ.get('MINI_HARNESS_CONFIG_FILE') or path or LOCAL_CONFIG)
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return {}
+    settings = {}
+    inside = False
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if not line[:1].isspace():
+            inside = line.partition(':')[0].strip().lower() == 'embedding'
+            continue
+        if not inside:
+            continue
+        key, separator, value = line.partition(':')
+        field = EMBED_KEYS.get(key.strip().lower()) if separator else None
+        value = value.strip().strip('\'"')
+        if field and value:
+            settings[field] = value
+    return settings
+
 @dataclass(frozen = True)
 class Config:
     # default_factory, not a direct call: a direct call would freeze the
@@ -438,6 +482,11 @@ def build_config() -> Config:
                                  ('MINI_HARNESS_SKILLS_DIR', 'skills_dir')):
         if value := os.environ.get(env_name):
             overrides[field_name] = value
+    # The local file only fills what the environment left unset, and the bench
+    # profile does not read it at all: see LOCAL_CONFIG above.
+    if os.environ.get('MINI_HARNESS_PROFILE') != 'bench':
+        for field_name, value in local_embedding().items():
+            overrides.setdefault(field_name, value)
     if backend := overrides.get('recall_backend'):
         if backend not in RECALL_BACKENDS:
             raise ValueError(f'MINI_HARNESS_RECALL_BACKEND must be one of {sorted(RECALL_BACKENDS)}, '

@@ -112,6 +112,12 @@ class Result:
     mutations: int = 0
     model_calls: int = 0
     usage_by_source: dict = field(default_factory = dict)
+    # Prompt tokens the provider served from its cache, and what the same usage
+    # would have cost billed without that discount. Both are needed to quote a
+    # cost honestly: the raw `cost` alone hides a 4x difference on a cache-heavy
+    # run, and this is the number an unconfigured price would have produced.
+    cached_total: int = 0
+    cost_naive: float = 0.0
     # What the last verification had to do with the change, and what is still
     # unaccounted for. `verified` is the summary of these two.
     verification: str = 'none'
@@ -465,6 +471,8 @@ class DeepSeekAgent:
             mutations = mutated,
             model_calls = ACCOUNT.calls,
             usage_by_source = ACCOUNT.by_source,
+            cached_total = ACCOUNT.cached_total,
+            cost_naive = budget.uncached_cost,
             verification = verification,
             unverified_files = tuple(sorted(changed))
         )

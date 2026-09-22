@@ -1,41 +1,153 @@
 {
-  "offline": true,
-  "provider": null,
-  "model": "text-embedding-3-small",
-  "distractors": 60,
-  "rows": [
+  "offline": false,
+  "provider": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "model": "text-embedding-v4",
+  "distractors": [
+    50,
+    200,
+    800
+  ],
+  "scenarios": [
     {
-      "backend": "lexical",
-      "model": "none",
-      "entries": 66,
-      "queries": 6,
-      "top1": 3,
-      "top3": 4,
-      "embed_calls": 0,
-      "embed_texts": 0,
-      "median_ms": 1.6759000136516988
+      "distractors": 50,
+      "rows": [
+        {
+          "backend": "lexical",
+          "model": "none",
+          "entries": 56,
+          "queries": 6,
+          "top1": 1,
+          "top3": 2,
+          "embed_calls": 0,
+          "embed_texts": 0,
+          "provider_requests": 0,
+          "cold_ms": 6.420799996703863,
+          "warm_median_ms": 1.7472000035922974,
+          "median_ms": 1.7672999965725467
+        },
+        {
+          "backend": "vector",
+          "model": "text-embedding-v4",
+          "entries": 56,
+          "queries": 6,
+          "top1": 4,
+          "top3": 5,
+          "embed_calls": 7,
+          "embed_texts": 62,
+          "provider_requests": 12,
+          "cold_ms": 8001.053099986166,
+          "warm_median_ms": 187.4213000119198,
+          "median_ms": 200.05385001422837
+        },
+        {
+          "backend": "hybrid",
+          "model": "text-embedding-v4",
+          "entries": 56,
+          "queries": 6,
+          "top1": 4,
+          "top3": 5,
+          "embed_calls": 7,
+          "embed_texts": 62,
+          "provider_requests": 12,
+          "cold_ms": 3976.819500006968,
+          "warm_median_ms": 217.73039997788146,
+          "median_ms": 227.9429999907734
+        }
+      ]
     },
     {
-      "backend": "vector",
-      "model": "hash-local",
-      "entries": 66,
-      "queries": 6,
-      "top1": 3,
-      "top3": 5,
-      "embed_calls": 7,
-      "embed_texts": 72,
-      "median_ms": 7.367400001385249
+      "distractors": 200,
+      "rows": [
+        {
+          "backend": "lexical",
+          "model": "none",
+          "entries": 206,
+          "queries": 6,
+          "top1": 1,
+          "top3": 2,
+          "embed_calls": 0,
+          "embed_texts": 0,
+          "provider_requests": 0,
+          "cold_ms": 32.71860000677407,
+          "warm_median_ms": 3.1390999793075025,
+          "median_ms": 3.211799979908392
+        },
+        {
+          "backend": "vector",
+          "model": "text-embedding-v4",
+          "entries": 206,
+          "queries": 6,
+          "top1": 3,
+          "top3": 4,
+          "embed_calls": 7,
+          "embed_texts": 212,
+          "provider_requests": 27,
+          "cold_ms": 11099.097800004529,
+          "warm_median_ms": 327.3719999997411,
+          "median_ms": 341.0266999999294
+        },
+        {
+          "backend": "hybrid",
+          "model": "text-embedding-v4",
+          "entries": 206,
+          "queries": 6,
+          "top1": 3,
+          "top3": 3,
+          "embed_calls": 7,
+          "embed_texts": 212,
+          "provider_requests": 27,
+          "cold_ms": 11479.544600006193,
+          "warm_median_ms": 277.6984999945853,
+          "median_ms": 298.6712999991141
+        }
+      ]
     },
     {
-      "backend": "hybrid",
-      "model": "hash-local",
-      "entries": 66,
-      "queries": 6,
-      "top1": 4,
-      "top3": 4,
-      "embed_calls": 7,
-      "embed_texts": 72,
-      "median_ms": 7.352349988650531
+      "distractors": 800,
+      "rows": [
+        {
+          "backend": "lexical",
+          "model": "none",
+          "entries": 806,
+          "queries": 6,
+          "top1": 1,
+          "top3": 2,
+          "embed_calls": 0,
+          "embed_texts": 0,
+          "provider_requests": 0,
+          "cold_ms": 76.41740000690334,
+          "warm_median_ms": 11.796200007665902,
+          "median_ms": 12.285350007005036
+        },
+        {
+          "backend": "vector",
+          "model": "text-embedding-v4",
+          "entries": 806,
+          "queries": 6,
+          "top1": 3,
+          "top3": 3,
+          "embed_calls": 7,
+          "embed_texts": 812,
+          "provider_requests": 87,
+          "cold_ms": 30459.54179999535,
+          "warm_median_ms": 449.30700000259094,
+          "median_ms": 472.1772500051884
+        },
+        {
+          "backend": "hybrid",
+          "model": "text-embedding-v4",
+          "entries": 806,
+          "queries": 6,
+          "top1": 3,
+          "top3": 3,
+          "embed_calls": 7,
+          "embed_texts": 812,
+          "provider_requests": 87,
+          "cold_ms": 33076.67219999712,
+          "warm_median_ms": 394.81009999872185,
+          "median_ms": 418.03004998655524
+        }
+      ]
     }
   ]
 }

@@ -342,3 +342,30 @@ def test_no_override_leaves_the_configurations_alone():
     configs = {'baseline': {'verify_required': False}}
 
     assert mini_bench.apply_overrides(configs) == {'baseline': {'verify_required': False}}
+
+
+# ------------------------------------------------------------------ the recorded rows
+
+
+def test_a_recorded_run_carries_the_accounting_its_cost_is_quoted_with():
+    """`cost` alone hides a 4x difference, and hides any subtask that was billed.
+
+    The artifact is committed, so this also pins the shape of the rows the
+    documents summarise: a run whose cost is quoted has to say how much of its
+    input was cached, what the same usage would cost without that discount, and
+    which part of the run spent it.
+    """
+    path = ROOT / 'MINI_BENCH_PRICED.json'
+    if not path.exists():
+        pytest.skip('no priced run recorded here')
+    rows = json.loads(path.read_text(encoding='utf-8'))
+
+    for row in rows:
+        assert 'cached_tokens' in row and 'cost_naive' in row and 'usage_by_source' in row
+        assert 0 <= row['cached_tokens'] <= row['prompt_tokens']
+        assert row['cost_naive'] >= row['cost']
+        assert row['usage_by_source'], 'a run always bills at least its own turns'
+        assert sum(entry['prompt'] for entry in row['usage_by_source'].values()) == \
+            row['prompt_tokens']
+        assert sum(entry['completion'] for entry in row['usage_by_source'].values()) == \
+            row['completion_tokens']

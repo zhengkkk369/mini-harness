@@ -66,6 +66,42 @@ def test_an_attached_budget_receives_every_source():
     assert budget.tokens == 3_000_000
 
 
+def test_the_uncached_cost_is_what_a_missing_cache_price_would_have_shown():
+    """The quoted cost is only meaningful beside the rate it used.
+
+    Billing cached input at the miss rate is what a configuration without
+    `price_cache_in` does, and the difference is large enough to change a
+    conclusion: the eight recorded priced runs read as $0.0866 instead of $0.0210.
+    """
+    budget = Budget(**PRICES)
+    ACCOUNT.attach(budget)
+
+    ACCOUNT.record(usage(prompt = 1_000_000, completion = 1_000_000, cached = 800_000))
+
+    # 200k uncached in at $1/M + 800k cached at $0.50/M + 1M out at $2/M
+    assert budget.cost == pytest.approx(2.6)
+    # All 1M input at the miss rate instead.
+    assert budget.uncached_cost == pytest.approx(3.0)
+
+
+def test_without_a_cache_price_the_two_costs_agree():
+    budget = Budget(price_in = 1.0, price_out = 2.0)
+    ACCOUNT.attach(budget)
+
+    ACCOUNT.record(usage(prompt = 1_000_000, completion = 0, cached = 400_000))
+
+    assert budget.cost == pytest.approx(budget.uncached_cost)
+
+
+def test_no_prices_means_no_cost_at_all():
+    budget = Budget(token_budget = 10)
+    ACCOUNT.attach(budget)
+    ACCOUNT.record(usage(prompt = 1_000_000, completion = 1_000_000, cached = 500_000))
+
+    assert budget.cost == 0
+    assert budget.uncached_cost == 0
+
+
 def test_exceeded_reports_the_attached_budget():
     assert ACCOUNT.exceeded() is None
 

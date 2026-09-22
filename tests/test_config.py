@@ -236,6 +236,94 @@ def test_the_embedding_endpoint_is_read_from_the_environment(monkeypatch):
     assert cfg.embed_api_key == "embed-key"
 
 
+# --------------------------------------------------- the local config.yaml file
+
+
+LOCAL = """\
+# a local file, gitignored because it carries a key
+embedding:
+  api_key: "sk-local-secret"
+  base_url: "https://embed.local/v1"
+  model_name: "text-embedding-local"
+
+agent:
+  api_key: "not-an-embedding-setting"
+"""
+
+
+def write_local_config(tmp_path, text=LOCAL):
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_the_embedding_block_is_read_from_a_local_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(write_local_config(tmp_path)))
+
+    cfg = build_config()
+
+    assert cfg.embed_base_url == "https://embed.local/v1"
+    assert cfg.embed_model == "text-embedding-local"
+    assert cfg.embed_api_key == "sk-local-secret"
+
+
+def test_the_environment_wins_over_the_local_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(write_local_config(tmp_path)))
+    monkeypatch.setenv("MINI_HARNESS_EMBED_BASE_URL", "https://embed.env/v1")
+    monkeypatch.setenv("MINI_HARNESS_EMBED_MODEL", "embed-from-env")
+
+    cfg = build_config()
+
+    assert cfg.embed_base_url == "https://embed.env/v1"
+    assert cfg.embed_model == "embed-from-env"
+    # Only the settings the environment did not name come from the file.
+    assert cfg.embed_api_key == "sk-local-secret"
+
+
+def test_only_the_embedding_block_is_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(write_local_config(tmp_path)))
+
+    from mini_harness.config import local_embedding
+
+    settings = local_embedding()
+    assert set(settings) == {"embed_api_key", "embed_base_url", "embed_model"}
+    assert "not-an-embedding-setting" not in settings.values()
+
+
+def test_a_missing_local_file_is_not_an_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(tmp_path / "absent.yaml"))
+
+    from mini_harness.config import local_embedding
+
+    assert local_embedding() == {}
+    assert build_config().embed_base_url == ""
+
+
+def test_a_malformed_local_file_is_not_an_error(monkeypatch, tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("embedding:\n  base_url\n  model_name:\n  api_key: 'a-key'\n",
+                    encoding="utf-8")
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(path))
+
+    cfg = build_config()
+
+    assert cfg.embed_base_url == ""
+    assert cfg.embed_model == "text-embedding-3-small"
+    assert cfg.embed_api_key == "a-key"
+
+
+def test_the_bench_profile_ignores_the_local_file(monkeypatch, tmp_path):
+    """A bench run has to be reproducible from its command line alone."""
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(write_local_config(tmp_path)))
+    monkeypatch.setenv("MINI_HARNESS_PROFILE", "bench")
+
+    cfg = build_config()
+
+    assert cfg.embed_base_url == ""
+    assert cfg.embed_api_key == ""
+    assert cfg.profile == "bench"
+
+
 def test_deny_lists_are_split_on_commas(monkeypatch):
     monkeypatch.setenv("MINI_HARNESS_DENY_TOOLS", "run_bash, run_sandbox")
     monkeypatch.setenv("MINI_HARNESS_DENY_PATTERNS", "rm -rf*,curl * | sh")

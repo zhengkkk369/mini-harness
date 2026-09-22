@@ -406,21 +406,26 @@ executed. Both paths are covered in `tests/test_selector.py`.
 - **Retrieval was measured on synthetic text.** Five planted facts per size,
   against filler that shares vocabulary with the queries. Real conversation
   queries are messier, and the useful message may share no rare token with them.
+  The provider-backed measurement in [MODEL_EVAL.md](MODEL_EVAL.md) section 5 uses
+  six paraphrase queries, so one query is 17 points there.
 - **The exposure experiment measures a payload, not a request.** It counts the
   serialised schemas of the tools a budget selects. The token column is a
   `chars / 4` estimate, not a tokenizer count, and the bridged surface is
   synthetic filler rather than a real server. The recovery path is real: it runs
   the shipped `find_tools` and selection code.
-- **Vector retrieval quality is not measured here.** The only embedder this suite
-  can run offline hashes tokens, so it is a weaker lexical scorer, not a semantic
-  one. The measured part is the plumbing: batching, the cache, normalisation, the
-  cosine scan and the fallback. A real embeddings endpoint is needed to say
-  anything about quality, and the harness's default provider does not offer one.
-  `bench/embed_quality.py` is that measurement, ready to run: it uses a provider
-  when `MINI_HARNESS_EMBED_BASE_URL` is set and the stand-in otherwise, and labels
-  which one it used in its output. Its corpus is paraphrase-shaped -- a query and
-  its fact share no content word -- because that is the case lexical scoring
-  cannot serve.
+- **Vector retrieval quality is measured elsewhere, against a provider.** The only
+  embedder this suite can run offline hashes tokens, so it is a weaker lexical
+  scorer, not a semantic one. The measured part here is the plumbing: batching,
+  the cache, normalisation, the cosine scan and the fallback. A real embeddings
+  endpoint is needed to say anything about quality, and the harness's default
+  provider does not offer one. `bench/embed_quality.py` is that measurement, and
+  it has now been run against a real model: the result is in
+  [MODEL_EVAL.md](MODEL_EVAL.md) section 5, with the raw numbers in
+  [EMBED_QUALITY.json](EMBED_QUALITY.json). It uses a provider when one is
+  configured (the environment or an `embedding:` block in a local, gitignored
+  `config.yaml`) and the stand-in otherwise, labelling which one it used in its
+  output. Its corpus is paraphrase-shaped -- a query and its fact share no content
+  word -- because that is the case lexical scoring cannot serve.
 
 ## Files
 

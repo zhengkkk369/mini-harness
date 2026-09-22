@@ -81,6 +81,28 @@ def test_the_older_tables_quote_the_recorded_values(artifact, document):
             assert f'${summary["total_cost"]:.4f}' in document, f'{artifact}/{config}: cost'
 
 
+def test_the_recorded_retrieval_measurement_is_in_the_document(document):
+    """A provider-backed measurement has to be documented, not just recorded.
+
+    The artifact is committed, so a run that improved or broke retrieval quality
+    shows up here as a document that no longer matches it.
+    """
+    from bench.embed_quality import QUALITY_HEADER, quality_rows
+
+    path = ROOT / 'EMBED_QUALITY.json'
+    if not path.exists():
+        pytest.skip('no retrieval measurement recorded here')
+    artifact = json.loads(path.read_text(encoding='utf-8'))
+    if artifact.get('offline') or not artifact.get('scenarios'):
+        pytest.skip('only a provider run says anything about an embedding model')
+
+    assert QUALITY_HEADER in document, 'MODEL_EVAL.md does not carry the retrieval table header'
+    assert artifact['model'] in document, f"{artifact['model']} is not named in the document"
+    missing = [row for row in quality_rows(artifact) if row not in document]
+
+    assert not missing, 'MODEL_EVAL.md does not carry:\n' + '\n'.join(missing)
+
+
 def test_the_document_says_how_many_tasks_the_suite_has(document):
     from bench import mini_bench
 

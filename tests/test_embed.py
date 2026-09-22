@@ -160,6 +160,138 @@ def test_the_cache_holds_unit_vectors():
     assert sum(value * value for value in vector) == pytest.approx(1.0)
 
 
+# ------------------------------------------- a provider's own batch ceiling
+
+
+class CappedEmbeddings(FakeEmbeddings):
+    """A provider that refuses more than ``cap`` inputs per request.
+
+    Modelled on the message a real ``text-embedding-v4`` deployment returned:
+    "Value error, batch size is invalid, it should not be larger than 10."
+    """
+
+    def __init__(self, cap: int, error: str = 'batch size is invalid, it should not be'
+                                             ' larger than {cap}.'):
+        super().__init__()
+        self.cap = cap
+        self.error = error
+
+    def create(self, model, input):
+        if len(input) > self.cap:
+            self.calls.append({'model': model, 'input': list(input), 'rejected': True})
+            raise ValueError(self.error.format(cap=self.cap))
+        return super().create(model, input)
+
+
+def test_a_batch_ceiling_is_discovered_instead_of_configured():
+    """A provider's cap must not require the caller to know it in advance."""
+    client = FakeClient()
+    client.embeddings = CappedEmbeddings(cap=10)
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=96, client=client)
+
+    vectors = embedder.embed([f'text {index}' for index in range(40)])
+
+    assert len(vectors) == 40
+    assert embedder.batch <= 10
+    # Every text was embedded exactly once, in order, despite the rejects.
+    accepted = [call for call in client.embeddings.calls if not call.get('rejected')]
+    assert [text for call in accepted for text in call['input']] == [
+        f'text {index}' for index in range(40)]
+    assert embedder.requests == len(accepted)
+
+
+def test_a_rejected_chunk_still_returns_vectors_for_its_texts():
+    client = FakeClient()
+    client.embeddings = CappedEmbeddings(cap=2)
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=8, client=client)
+
+    vectors = embedder.embed(['a', 'b', 'c', 'd', 'e'])
+
+    assert len(vectors) == 5
+    assert embedder.batch == 2
+    assert all(sum(value * value for value in vector) == pytest.approx(1.0)
+               for vector in vectors)
+
+
+def test_an_error_that_is_not_a_batch_ceiling_is_raised():
+    """A bad key must fail, not be retried as a hundred tiny requests."""
+    class Broken(FakeEmbeddings):
+        def create(self, model, input):
+            self.calls.append({'model': model, 'input': list(input)})
+            raise ValueError('Incorrect API key provided')
+
+    client = FakeClient()
+    client.embeddings = Broken()
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=4, client=client)
+
+    with pytest.raises(ValueError, match='Incorrect API key'):
+        embedder.embed(['a', 'b', 'c'])
+
+    assert len(client.embeddings.calls) == 1
+
+
+def test_every_text_is_embedded_when_the_batch_shrinks_mid_call():
+    """The stride must follow the shrinking batch, not the original one.
+
+    With a precomputed stride the loop skipped the texts between the old and new
+    boundaries: the chunk after the rejection started at the *old* offset, so a
+    slice of the middle of the list was never embedded at all, and the missing
+    cache entries surfaced as a `KeyError` in a later search. The sizes here are
+    chosen so that stride and shrink disagree.
+    """
+    client = FakeClient()
+    client.embeddings = CappedEmbeddings(cap=3)
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=20, client=client)
+    texts = [f'text {index}' for index in range(25)]
+
+    first = embedder.embed(texts)
+    requests = embedder.requests
+    # A complete cache means the second call costs nothing at all.
+    second = embedder.embed(texts)
+
+    assert len(first) == len(texts) == len(second)
+    assert first == second
+    assert embedder.requests == requests
+    assert all(vector for vector in first)
+
+
+def test_a_ceiling_that_is_not_stated_falls_back_to_halving():
+    """Some providers reject without naming a number; that must still work."""
+    client = FakeClient()
+    client.embeddings = CappedEmbeddings(cap=10, error='too many inputs in one request')
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=96, client=client)
+
+    vectors = embedder.embed([f'text {index}' for index in range(30)])
+
+    assert len(vectors) == 30
+    assert embedder.batch <= 10
+    assert embedder.requests > 3
+
+
+def test_a_single_text_that_is_rejected_is_not_split_forever():
+    client = FakeClient()
+    client.embeddings = CappedEmbeddings(cap=0)
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=4, client=client)
+
+    with pytest.raises(ValueError):
+        embedder.embed(['one'])
+
+
+def test_the_batch_description_counts_requests_not_calls():
+    """`embed_calls` counts embed() calls; the provider bills requests."""
+    client = FakeClient()
+    client.embeddings = CappedEmbeddings(cap=10)
+    embedder = OpenAIEmbedder('m', 'key', 'https://example.test/v1', batch=96, client=client)
+
+    embedder.embed([f'text {index}' for index in range(20)])
+    described = embedder.describe()
+
+    assert described['embed_calls'] == 1
+    assert described['embed_requests'] == len(
+        [call for call in client.embeddings.calls if not call.get('rejected')])
+    assert described['embed_requests'] > 1
+
+
 def test_normalising_a_zero_vector_keeps_it_finite():
     assert normalize([0.0, 0.0]) == [0.0, 0.0]
 

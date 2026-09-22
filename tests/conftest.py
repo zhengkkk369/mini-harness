@@ -96,6 +96,19 @@ def clean_accounting():
     ACCOUNT.reset()
 
 
+@pytest.fixture(autouse=True)
+def no_local_config(monkeypatch, scratch_root):
+    """Never read a developer's `config.yaml`.
+
+    `build_config` fills the embedding settings from that file when the
+    environment leaves them unset, which is what makes it usable and also what
+    would make the suite depend on whatever happens to be in the working
+    directory -- including a real API key. Point it at a file that does not
+    exist; the tests that cover the file pass their own path.
+    """
+    monkeypatch.setenv("MINI_HARNESS_CONFIG_FILE", str(scratch_root / "absent-config.yaml"))
+
+
 @pytest.fixture
 def session_dir(tmp_path):
     """Where the agent under test writes session.json and its audit log."""

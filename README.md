@@ -148,8 +148,9 @@ export MINI_HARNESS_PRICE_CACHE_IN=0.003 # dollars per million cached input toke
 
 Set `MINI_HARNESS_PRICE_CACHE_IN` too if you want a real figure: cached input can
 be most of the input, and pricing it at the uncached rate makes the estimate a
-conservative upper bound instead of an accurate one. In the recorded runs 95% of
-input was cached, and a single input price overstated the cost by 4.2x.
+conservative upper bound instead of an accurate one. In the recorded runs 94.7% of
+input was cached, and a single input price overstated the cost by 4.12x — each run
+records both figures, as `cost` and `cost_naive`.
 
 Cost stays at zero unless both prices are set, so a token budget needs no
 pricing data. `Result` reports `cost` and which budget stopped the run, and the
@@ -328,8 +329,30 @@ export MINI_HARNESS_RECALL_BACKEND=hybrid
 export MINI_HARNESS_EMBED_MODEL=text-embedding-3-small
 export MINI_HARNESS_EMBED_BASE_URL=https://api.openai.com/v1   # an /embeddings provider
 export MINI_HARNESS_EMBED_API_KEY=...                          # defaults to the main key
-export MINI_HARNESS_EMBED_BATCH=96                             # texts per request
+export MINI_HARNESS_EMBED_BATCH=96                             # texts per request, an upper bound
 ```
+
+The same three settings can live in a gitignored `config.yaml` next to the
+checkout, which is convenient because one of them is a key:
+
+```yaml
+embedding:
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model_name: "text-embedding-v4"
+  api_key: "..."
+```
+
+The environment still wins over that file, only those three settings are read
+from it, and a `bench`-profile run ignores it entirely — a benchmark has to be
+reproducible from its command line. The file is in `.gitignore`, because a
+credential in a tracked file is a mistake waiting to happen.
+
+`embed_batch` is an upper bound, not a requirement: providers disagree about how
+many inputs one request may carry and do not advertise it. A provider that
+refuses a chunk with an error naming the batch gets a smaller chunk, at the size
+it named when it names one, and the smaller size is kept for the rest of the
+call. An error that is not about batch size (a bad key, a missing model) is
+raised rather than retried as a hundred tiny requests.
 
 The default provider for this harness serves no `/embeddings` route, so `vector`
 and `hybrid` need `embed_base_url` pointed at a provider that does. `hybrid` is
@@ -349,6 +372,12 @@ Two things worth knowing before switching:
 without a network call. It hashes tokens, so it is a weaker lexical scorer, not a
 semantic one — [EXPERIMENTS.md](EXPERIMENTS.md) reports what it measures, and is
 explicit that it says nothing about the quality of a real embedding model.
+
+That measurement has since been run against a real model
+(`text-embedding-v4`): on six paraphrase queries it lifts top-1 from lexical
+scoring's 1/6 to 3–4/6, and fusion does not beat it. The numbers, the cost of
+each backend and what the corpus cannot resolve are in
+[MODEL_EVAL.md](MODEL_EVAL.md) section 5; `bench/embed_quality.py` re-runs it.
 
 ## MCP servers
 
