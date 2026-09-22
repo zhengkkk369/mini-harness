@@ -222,7 +222,7 @@ Reading it:
 - **A real summariser keeps the substance and not the sentences.** The `model`
   rows reproduce almost none of the planted facts *word for word* -- 1/6 at six
   turns, 0/6 at twelve and thirty -- which is what a summary is for. The
-  paraphrase-tolerant reading is the one that matters: 88-100% of each fact's own
+  paraphrase-tolerant reading is the one that matters: 87-100% of each fact's own
   words are still present and **all six facts survive in substance at every
   size**. A model does not have to quote to keep something.
 - **So the fault line is the archive, not the summary.** With a summary that
