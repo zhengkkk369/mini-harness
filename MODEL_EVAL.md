@@ -148,7 +148,7 @@ are denied by policy.
 | passed | 8/8 |
 | nudges fired | **8 — exactly one per run** |
 | `verified` | `0/2` on every task |
-| median turns | 11 |
+| median turns | 10.5 |
 | total tokens | 497,446 |
 | cost | $0.0210 |
 

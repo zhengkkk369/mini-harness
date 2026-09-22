@@ -79,6 +79,12 @@ def test_the_older_tables_quote_the_recorded_values(artifact, document):
             f'{artifact}/{config}: total tokens {summary["total_tokens"]:,} appear nowhere')
         if summary['total_cost']:
             assert f'${summary["total_cost"]:.4f}' in document, f'{artifact}/{config}: cost'
+        # The priced artifact is summarised by a hand-written table rather than by
+        # a canonical row, and that is where a stale median turns hid: every other
+        # column of this run was checked, so 11 sat there against a recorded 10.5.
+        if artifact == 'MINI_BENCH_PRICED.json':
+            assert f"{summary['median_turns']:g}" in document, (
+                f'{artifact}/{config}: median turns {summary["median_turns"]:g} appear nowhere')
 
 
 def test_the_recorded_retrieval_measurement_is_in_the_document(document):
