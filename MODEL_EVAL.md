@@ -280,7 +280,7 @@ Counting every run this repository has recorded:
 
 | runs | `verify_required` | shell available | nudges |
 | ---: | --- | --- | ---: |
-| 81 | on | yes | **0** |
+| 111 | on | yes | **0** |
 | 8 | on | no (denied by policy) | 8 — one per run |
 | 57 | off | yes | n/a |
 
@@ -529,51 +529,93 @@ an embedding model match a query to an archived message that says the same thing
 in different words? That needed a provider. One was pointed at, and
 `bench/embed_quality.py` recorded it in
 [EMBED_QUALITY.json](EMBED_QUALITY.json): `text-embedding-v4` over an
-OpenAI-compatible endpoint, six paraphrase queries (each query and the fact that
-answers it share no content word), distractors that share vocabulary with the
+OpenAI-compatible endpoint, **forty** paraphrase queries (each query and the fact
+that answers it share no content word), distractors that share vocabulary with the
 queries, at three archive sizes.
 
 | archived | backend | model | top-1 | top-3 | embed calls | requests | cold (ms) | warm query (ms) |
 | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 56 | lexical | none | 1/6 | 2/6 | 0 | 0 | 6.42 | 1.75 |
-| 56 | vector | text-embedding-v4 | 4/6 | 5/6 | 7 | 12 | 8001.05 | 187.42 |
-| 56 | hybrid | text-embedding-v4 | 4/6 | 5/6 | 7 | 12 | 3976.82 | 217.73 |
-| 206 | lexical | none | 1/6 | 2/6 | 0 | 0 | 32.72 | 3.14 |
-| 206 | vector | text-embedding-v4 | 3/6 | 4/6 | 7 | 27 | 11099.10 | 327.37 |
-| 206 | hybrid | text-embedding-v4 | 3/6 | 3/6 | 7 | 27 | 11479.54 | 277.70 |
-| 806 | lexical | none | 1/6 | 2/6 | 0 | 0 | 76.42 | 11.80 |
-| 806 | vector | text-embedding-v4 | 3/6 | 3/6 | 7 | 87 | 30459.54 | 449.31 |
-| 806 | hybrid | text-embedding-v4 | 3/6 | 3/6 | 7 | 87 | 33076.67 | 394.81 |
+| 90 | lexical | none | 2/40 | 5/40 | 0 | 0 | 6.25 | 1.30 |
+| 90 | vector | text-embedding-v4 | 23/40 | 30/40 | 41 | 49 | 9014.25 | 191.63 |
+| 90 | hybrid | text-embedding-v4 | 8/40 | 17/40 | 41 | 49 | 6461.51 | 193.21 |
+| 240 | lexical | none | 2/40 | 6/40 | 0 | 0 | 35.62 | 3.89 |
+| 240 | vector | text-embedding-v4 | 22/40 | 29/40 | 41 | 65 | 12504.01 | 252.99 |
+| 240 | hybrid | text-embedding-v4 | 8/40 | 18/40 | 41 | 65 | 11788.88 | 227.63 |
+| 840 | lexical | none | 2/40 | 6/40 | 0 | 0 | 47.52 | 6.66 |
+| 840 | vector | text-embedding-v4 | 21/40 | 28/40 | 41 | 125 | 31993.05 | 350.61 |
+| 840 | hybrid | text-embedding-v4 | 8/40 | 18/40 | 41 | 125 | 34657.41 | 462.12 |
 
 Reading it:
 
 - **The class of miss the backend exists for is real, and embeddings close it.**
-  Lexical scoring finds 1 of 6 paraphrase queries at every size; the embedding
-  model finds 3–4. That gap is larger than the corpus's resolution, and it is the
-  first measurement here that says anything positive about vector recall.
-- **Six queries is a small instrument, and one query is 17 points.** The
-  difference between 4/6 at 56 entries and 3/6 at 206 and 806 is *one query* —
-  do not read it as "quality degrades with archive size". The lexical row is flat
-  at 1/6, and the vector row never falls to it.
-- **Fusion did not beat the better half.** `hybrid` (reciprocal rank fusion)
-  equals `vector` at 56 entries, has a worse top-3 at 206, and equals it at 806.
-  RRF is the safe default because it cannot do worse than its inputs *in
-  expectation*, but on this corpus it bought nothing.
-- **What it costs.** Embedding the archive is a cold-start cost of 8 s (56
-  texts), 11 s (206) and 30 s (806) — 12, 27 and 87 requests, because that
+  Lexical scoring finds **2 of 40** paraphrase queries at every size; the
+  embedding model finds **21–23 of 40**. That is a ten-fold difference on the one
+  query shape the corpus was built to isolate, and it is flat across a
+  nine-fold change in archive size — the ranking is not degrading as the archive
+  grows.
+- **Forty queries makes a query worth 2.5 points, so the gap is not a coin
+  flip.** 2/40 against 22/40 is a twenty-query difference. (The first recording of
+  this experiment had six queries, where one query was 17 points and the same
+  conclusion could not be drawn; the corpus was extended for this reason.)
+- **Fusion is worse than the better half, not merely equal to it.** `hybrid`
+  (reciprocal rank fusion) scores 8/40 — better than lexical, far below vector.
+  RRF cannot *rank* below both its inputs in expectation, but it can and does here
+  lose to vector, because half of the fused ranking is lexical noise with no
+  signal on this query shape. **The safe default is not the best choice for
+  paraphrase queries**, and this corpus is why the backend is selectable.
+- **What it costs.** Embedding the archive is a cold-start cost of 9 s (90
+  texts), 12.5 s (240) and 32 s (840) — 49, 65 and 125 requests, because that
   provider accepts at most ten inputs per request and the embedder discovers that
-  from the error rather than being configured with it. A warm query then costs
-  187–449 ms against 1.75–11.8 ms for lexical: roughly two orders of magnitude,
-  plus sending the archive — the text compaction removed — to a third party.
-  `embed calls` stays at 7 (one archive pass plus six queries) at every size: the
-  vectors are cached per text for the process.
-- **The cache is what makes this affordable.** Only the cold column scales with
-  the archive; the queries themselves are one embedding each. `recall` is a tool
-  the model calls occasionally, not a per-turn cost.
+  from the error rather than being configured with it. A warm query costs
+  192–351 ms against 1.3–6.7 ms for lexical: two orders of magnitude, plus sending
+  the archive — the text compaction removed — to a third party.
+- **The cache is what makes this affordable.** `embed calls` is 41 at every size
+  (one archive pass plus forty queries): the vectors are cached per text for the
+  process, so only the cold column scales with the archive. `recall` is a tool the
+  model calls occasionally, not a per-turn cost.
+- **The honest boundary.** Forty queries still means one query is 2.5 points, so
+  a two-point difference is not readable; and none of this measures whether
+  retrieval *helps the agent solve a task*, which is a task-level question this
+  suite cannot rank configurations for (section 2).
 
-What this still does not measure: whether retrieval *helps the agent solve a
-task*. That is a task-level question, and this suite cannot rank configurations
-(section 2).
+## 6. A tool budget, measured on tasks rather than on a payload
+
+Section 2's exposure experiment counts serialised schemas: a 36-tool surface with
+a budget of 8 is 6,149 characters instead of 18,557, a 67% smaller payload. That
+is a payload, not an outcome, and the obvious objection is that a smaller tool
+surface might cost the model the tool it needed. So the same surface was run
+through the harder tier: `bench/mini_bench.py` with 24 synthetic bridged tools
+added (the same 24 the exposure experiment counts), `baseline` exposing all 36
+against `budgeted_tools` exposing 8, three tasks at five repeats each.
+
+| config | passed | median turns | total tokens | total cost |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 15/15 | 6 | 1,017,064 | $0.0323 |
+| `budgeted_tools` | 15/15 | 5 | 381,264 | $0.0187 |
+
+- **The tasks still pass, and they pass the same way.** 15/15 in both
+  configurations: the smaller surface cost nothing measurable in outcome on this
+  tier.
+- **Prompt tokens fall by 63%, and cost by 42%.** 977,280 → 358,489 prompt tokens
+  (`−63.3%`), $0.0323 → $0.0187 (`−42.1%`). The token drop is larger than the cost
+  drop because 92–96% of the input is cache-priced either way.
+- **The model did not need the escape hatch.** `run_bash` is *not* in the exposed
+  eight (the ranking put `recall` and `skills` ahead of it — the ranking is
+  lexical and imperfect). One of the fifteen runs tried `run_bash` anyway, was
+  refused with `hidden_tool`, and finished the task with `run_sandbox`, which was
+  exposed. `find_tools` was called **zero** times: the documented recovery path
+  exists, and in this tier it was never needed.
+- **What this does not say.** One tier, three tasks, five repeats, one model. It
+  is evidence that a budget is not obviously harmful on tasks whose tools overlap,
+  not a licence to set a low budget everywhere — a task needing exactly the tool
+  the ranking dropped would pay for the miss, and the ranking is lexical.
+
+The same run also gives tool-level latency, which the run-level wall clock hides:
+across 264 tool calls the **p50 is 43 ms and the p95 is 7.2 s**, and the whole
+upper tail is `run_sandbox` (median 5.0 s, max 11.4 s) — a container call that
+starts a sandbox and runs a suite. Reading, editing and globbing are 15–39 ms. A
+p95 taken over *runs* therefore measures how many container calls a run made, not
+how slow its tooling is.
 
 ## Limitations
 
@@ -618,6 +660,11 @@ task*. That is a task-level question, and this suite cannot rank configurations
   benchmark scores the artifact and not the outcome. The check has since been
   repeated before a tool batch runs, which bounds the overshoot to one request
   rather than a request plus its batch; a single long tool call can still overrun.
+  Recording per-call time makes the size of that overshoot readable rather than
+  anecdotal: across 264 tool calls in the tool-budget run the p50 is 43 ms and the
+  p95 is 7.2 s, and the tail is entirely `run_sandbox` — a container start plus a
+  suite (median 5.0 s, max 11.4 s). The bound on an overshoot is therefore one
+  container call, not a turn.
 - **Prices move, and peak is double off-peak.** The cost figures come from the
   provider's published rates on the day, at off-peak. Re-check them before
   quoting any of these numbers, and pass `--price-in`, `--price-out` and
@@ -639,8 +686,14 @@ uv run python -m bench.mini_bench --tasks rolling_window --tasks round_half_up \
 uv run python -m bench.mini_bench --tasks split_cents --only baseline --only no_verify \
     --repeats 6 --out MINI_BENCH_NUDGE.json --price-in 0.15 --price-out 0.60 \
     --price-cache-in 0.003                        # the task built for the nudge
+uv run python -m bench.mini_bench --tasks rolling_window --tasks round_half_up \
+    --tasks sample_variance --only baseline --only budgeted_tools --repeats 5 \
+    --extra-tools 24 --out MINI_BENCH_TOOLS.json --price-in 0.15 --price-out 0.60 \
+    --price-cache-in 0.003                        # section 6, the tool-budget A/B
 uv run python -m bench.embed_quality --distractors 50 200 800 \
     --out EMBED_QUALITY.json                      # section 5, needs an embeddings provider
+uv run python -m bench.experiments --only compaction --live-summary \
+    --repeats 15                                  # the live compaction row, needs a model key
 ```
 
 The task definitions are also covered offline, without a model:
@@ -652,5 +705,8 @@ configuration override names a real config field.
 The raw results of the recorded runs are in [MINI_BENCH.json](MINI_BENCH.json)
 (the twelve-task suite), [MINI_BENCH_PRICED.json](MINI_BENCH_PRICED.json) (the
 priced `unverifiable` run), [MINI_BENCH_HARD.json](MINI_BENCH_HARD.json) (the
-harder tier) and [MINI_BENCH_NUDGE.json](MINI_BENCH_NUDGE.json) (the nudge
-task).
+harder tier), [MINI_BENCH_NUDGE.json](MINI_BENCH_NUDGE.json) (the nudge task),
+[MINI_BENCH_LONG.json](MINI_BENCH_LONG.json) and
+[MINI_BENCH_WEAK.json](MINI_BENCH_WEAK.json) (the long-horizon tier on two
+models), and [MINI_BENCH_TOOLS.json](MINI_BENCH_TOOLS.json) (the tool-budget A/B
+in section 6).

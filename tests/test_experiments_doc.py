@@ -14,6 +14,10 @@ The same thing then happened to the *paragraphs*: the rows were re-recorded and
 the sentences next to them kept quoting the previous run. So the sentences that
 quote a timed number are generated from the artifact as well, and the test below
 requires them verbatim.
+
+The live summariser is the one experiment that reaches the network, so this file
+also holds the guard on it: the runner's placeholder key must never be mistaken
+for a real one.
 """
 
 import json
@@ -79,6 +83,49 @@ def test_every_recorded_table_has_a_header_in_the_document(recorded, document):
             assert any(_key(spelling) in styled for spelling in HEADERS[table]), table
 
 
+def test_every_recorded_section_can_be_recorded_again(recorded):
+    """A section the runner cannot re-record is a section that will drift.
+
+    `--only` selects from a fixed list, so an experiment added to the artifact but
+    not to that list could never be re-measured on its own: the next re-record
+    would either move every other number or leave this one stale.
+    """
+    from bench.experiments import SECTIONS
+
+    metadata = {'python', 'platform', 'repeats'}
+
+    assert set(recorded) == set(SECTIONS) | metadata, (
+        'the artifact and the runner disagree about which experiments exist')
+
+
+def test_sync_adds_a_row_the_document_is_missing(tmp_path):
+    """The fixer has to be able to add, not only rewrite.
+
+    Re-recording compaction added a summariser: the artifact grew a row per size,
+    the document had no line for it, and the old sync wrote the artifact's first
+    rows over the document's and dropped the rest -- losing a whole group and
+    leaving the checker to notice.
+    """
+    import json as json_module
+
+    from bench.sync_experiments_doc import sync
+
+    artifact = json_module.loads(Path(ARTIFACT).read_text(encoding='utf-8'))
+    document = DOC.read_text(encoding='utf-8')
+    # Drop one recorded row and the line that carries it, then sync.
+    row = render_rows(artifact)['compaction'][0]
+    doctored = tmp_path / 'EXPERIMENTS.md'
+    doctored.write_text('\n'.join(line for line in document.splitlines() if line != row) + '\n',
+                        encoding='utf-8')
+
+    changed, unplaced = sync(doc=doctored, artifact=ARTIFACT)
+
+    assert changed >= 1
+    assert row in doctored.read_text(encoding='utf-8'), 'the missing row was not added back'
+    assert not [item for item in unplaced if item[0] == 'compaction']
+
+
+
 def test_the_document_carries_every_generated_sentence(recorded, document):
     """Prose that quotes a timed number has to be the current recording.
 
@@ -128,4 +175,49 @@ def test_sync_rewrites_a_sentence_that_quotes_an_old_run(tmp_path):
     assert render_prose(recorded)[1] in doctored.read_text(encoding='utf-8')
     assert changed >= 1
     assert not [item for item in unplaced if item[0] == 'prose']
+
+
+# --------------------------------------------------------------- the live summariser
+
+
+def test_the_runner_placeholder_is_not_a_credential(monkeypatch, tmp_path):
+    """`experiments.py` must not mistake its own offline placeholder for a key.
+
+    It sets `DEEPSEEK_API_KEY=experiments-offline` so that no offline experiment
+    can reach the network by accident. The live summariser is the one thing that
+    should reach it, and only with a key that came from somewhere real.
+    """
+    from bench.experiments import _real_key
+
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'experiments-offline')
+
+    assert _real_key(tmp_path / 'absent.env') == ''
+
+
+def test_the_live_summariser_refuses_to_start_without_a_key(monkeypatch, tmp_path):
+    from bench.experiments import LiveSummary
+
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'experiments-offline')
+
+    with pytest.raises(RuntimeError, match='DEEPSEEK_API_KEY'):
+        LiveSummary(env_path = tmp_path / 'absent.env')
+
+
+def test_a_key_in_a_local_env_file_is_used(monkeypatch, tmp_path):
+    from bench.experiments import _real_key
+
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'experiments-offline')
+    env = tmp_path / '.env'
+    env.write_text('SOMETHING_ELSE=1\nDEEPSEEK_API_KEY="sk-from-file"\n', encoding='utf-8')
+
+    assert _real_key(env) == 'sk-from-file'
+
+
+def test_a_real_environment_key_wins_and_needs_no_file(monkeypatch, tmp_path):
+    from bench.experiments import _real_key
+
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'sk-from-environment')
+
+    assert _real_key(tmp_path / 'absent.env') == 'sk-from-environment'
+
 

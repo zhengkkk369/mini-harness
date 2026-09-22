@@ -44,7 +44,7 @@ from mini_harness.agent import CORE_TOOLS, DeepSeekAgent  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
 from mini_harness.compact import COMPACT  # noqa: E402
 from mini_harness.embed import HashEmbedder  # noqa: E402
-from mini_harness.memory import Memory, journal_for  # noqa: E402
+from mini_harness.memory import Memory, journal_for, tokens  # noqa: E402
 from mini_harness.selector import SELECTION, select  # noqa: E402
 from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.box import TOOLS, ToolDefinition, find_tools  # noqa: E402
@@ -380,7 +380,8 @@ class SummaryStub:
     ``verbatim`` returns the prompt it was given, which is an upper bound no real
     model reaches: the summary then carries every removed message. The default
     returns a sentence that mentions nothing, which is the lower bound. Reality
-    sits between the two, and that gap is the part this experiment cannot measure.
+    sits between the two, and that gap is the part this experiment cannot measure
+    -- which is what ``LiveSummary`` exists to fill in, on request.
     """
 
     def __init__(self, verbatim: bool = False, prompt_tokens: int = 4000,
@@ -403,6 +404,53 @@ class SummaryStub:
     @property
     def chat(self):
         return SimpleNamespace(completions = SimpleNamespace(create = self._create))
+
+
+def _real_key(env_path = None) -> str:
+    """The provider key, from the environment or from `.env`.
+
+    This module sets a placeholder key and disables dotenv on purpose, so that no
+    offline experiment can reach the network by accident. Only the live
+    summariser asks for this, and it is the only thing here that spends money.
+    """
+    key = os.environ.get('DEEPSEEK_API_KEY') or ''
+    if key and key != 'experiments-offline':
+        return key
+    env = Path(env_path) if env_path is not None else Path(__file__).resolve().parents[1] / '.env'
+    if env.exists():
+        for line in env.read_text(encoding='utf-8').splitlines():
+            name, separator, value = line.partition('=')
+            if separator and name.strip() == 'DEEPSEEK_API_KEY':
+                return value.strip().strip('"\'')
+    return ''
+
+
+class LiveSummary:
+    """A real model as the summariser, through the call path compaction uses.
+
+    It presents the same surface as ``SummaryStub`` -- a ``chat.completions``
+    object that counts its calls -- so the experiment measures the model with the
+    same code that measures the bounds. ``COMPACT._request_agent`` bills the
+    usage to the run ledger, exactly as it does in a real run.
+    """
+
+    def __init__(self, cfg = None, env_path = None) -> None:
+        from openai import OpenAI
+
+        self.cfg = cfg if cfg is not None else Config()
+        self.calls = 0
+        self.model = self.cfg.model_sub
+        key = _real_key(env_path)
+        if not key:
+            raise RuntimeError('the live summariser needs DEEPSEEK_API_KEY (environment or .env)')
+        self._client = OpenAI(api_key = key, base_url = self.cfg.base_url, max_retries = 0)
+        self.chat = SimpleNamespace(completions = SimpleNamespace(create = self._create))
+
+    def _create(self, **kwargs):
+        self.calls += 1
+        response = self._client.chat.completions.create(**kwargs)
+        self.seen = response.choices[0].message.content or ''
+        return response
 
 
 def _conversation(turns: int, filler: int = 3) -> list:
@@ -432,30 +480,57 @@ def _facts_in_context(messages: list) -> set:
     return {key for key, fact in COMPACT_FACTS if fact in text}
 
 
+def _fact_coverage(messages: list) -> dict:
+    """How much of each fact's wording survives, paraphrase included.
+
+    `_facts_in_context` asks whether the exact sentence is still there, which a
+    summary that conveys the same thing in other words fails. This is the other
+    reading: the share of a fact's own words present anywhere in the context, and
+    how many facts are substantially there (at least 60% of their words). It says
+    nothing about truth -- a summary can keep the nouns and invert the meaning --
+    so the two numbers belong side by side, not instead of each other.
+    """
+    text = json.dumps(messages, ensure_ascii = False).lower()
+    present = set(tokens(text))
+    shares = []
+    for _, fact in COMPACT_FACTS:
+        words = {word for word in tokens(fact.lower()) if len(word) >= 4}
+        shares.append(len(words & present) / len(words) if words else 0.0)
+    return {
+        'fact_words_kept': round(sum(shares) / len(shares), 3) if shares else 0.0,
+        'facts_substantially_kept': sum(1 for share in shares if share >= 0.6),
+    }
+
+
 def _facts_in_archive(memory) -> set:
     text = '\n'.join(entry.text for entry in memory.entries())
     return {key for key, fact in COMPACT_FACTS if fact in text}
 
 
-def experiment_compaction(turns_list, recent_keep):
+def experiment_compaction(turns_list, recent_keep, live = False):
     """What compaction removes, what stays reachable, and at what cost.
 
-    The summariser is a stub in both directions, so this measures the machinery:
-    how much of the conversation leaves the context, whether the archive holds it,
-    and whether recall finds it again. The summary's own quality needs a real
-    model and is not measured here.
+    Two stub summarisers bracket the machinery: one returns the removed messages
+    verbatim (an upper bound no model reaches), one returns a sentence that
+    mentions nothing (the lower bound). With ``live`` a third row runs the real
+    model in the loop -- the row that says what a model actually keeps -- which
+    needs a credential and spends money, so it is never on by default.
     """
     workdir = WORK / 'compaction'
     workdir.mkdir(parents = True, exist_ok = True)
     rows = []
     for turns in turns_list:
-        for stub_name, verbatim in (('verbatim', True), ('losing', False)):
+        makers = [('verbatim', lambda: SummaryStub(verbatim = True)),
+                  ('losing', lambda: SummaryStub())]
+        if live:
+            makers.append(('model', lambda: LiveSummary(config_for(workdir, recent_keep = recent_keep))))
+        for stub_name, make in makers:
             session = workdir / f'session-{turns}-{stub_name}.json'
             session.unlink(missing_ok = True)
             journal_for(session).unlink(missing_ok = True)
             cfg = config_for(workdir, recent_keep = recent_keep)
             messages = _conversation(turns)
-            stub = SummaryStub(verbatim = verbatim)
+            stub = make()
 
             start = time.perf_counter()
             after = COMPACT.compact_content(stub, messages, session, cfg = cfg)
@@ -464,6 +539,7 @@ def experiment_compaction(turns_list, recent_keep):
             memory = Memory(journal_for(session))
             in_context = _facts_in_context(after)
             archived = _facts_in_archive(memory)
+            coverage = _fact_coverage(after)
 
             top1 = top3 = 0
             samples = []
@@ -480,11 +556,17 @@ def experiment_compaction(turns_list, recent_keep):
             rows.append({
                 'turns': turns,
                 'summary': stub_name,
+                'summary_model': getattr(stub, 'model', ''),
+                # What the summariser actually produced, for the live row only: the
+                # stubs return the prompt or one sentence, and neither is worth
+                # carrying. Without this a reader has to take 0/6 on faith.
+                'summary_head': (getattr(stub, 'seen', '') or '')[:400] if stub_name == 'model' else '',
                 'messages_before': len(messages),
                 'messages_after': len(after),
                 'removed': len(messages) - len(after),
                 'facts': len(COMPACT_FACTS),
                 'facts_in_context': len(in_context),
+                **coverage,
                 'facts_archived': len(archived),
                 'recall_top1': top1,
                 'recall_top3': top3,
@@ -902,6 +984,31 @@ def render(results):
     return '\n'.join(lines) + '\n'
 
 
+# Every experiment in the artifact, by the name it is recorded under. `--only`
+# selects from this list and a test requires the two to agree, so an experiment
+# that is recorded but cannot be re-recorded on its own cannot go unnoticed.
+SECTIONS = ('parallel', 'subagents', 'trace', 'verify', 'recall', 'compaction',
+            'compaction_repeat', 'vector', 'policy', 'exposure', 'recovery')
+
+
+def build_sections(args) -> dict:
+    """{section: thunk} for the run described by the command line."""
+    return {
+        'parallel': lambda: experiment_parallel(args.repeats, args.calls, (0.0, 0.005, 0.02)),
+        'subagents': lambda: experiment_subagents(args.repeats, args.subagents, (0.02, 0.1)),
+        'trace': lambda: experiment_trace(args.repeats, (args.turns, args.turns * 10)),
+        'verify': lambda: experiment_verify(args.repeats),
+        'recall': lambda: experiment_recall((50, 200, 800)),
+        'compaction': lambda: experiment_compaction((6, 12, 30), 8, live = args.live_summary),
+        'compaction_repeat': lambda: experiment_compaction_repeat((12,), 8),
+        'vector': lambda: experiment_vector_recall((50, 200, 800)),
+        'policy': experiment_policy,
+        'exposure': lambda: experiment_exposure(24, (0, 8, 12), 'fix the failing test in the parser'),
+        'recovery': lambda: experiment_recovery(24, 8, 'fix the failing test in the parser',
+                                                'vector_search'),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--out', default='EXPERIMENTS.json', help='where to write the raw results')
@@ -910,31 +1017,41 @@ def main():
     parser.add_argument('--subagents', type=int, default=4, help='subagents per batch')
     parser.add_argument('--turns', type=int, default=20,
                         help='tool turns in the short trace run; a second run is ten times longer')
+    parser.add_argument('--only', action='append', default=None,
+                        help='re-record only these sections, keeping the rest of the artifact '
+                             '(repeatable); a section nobody re-records keeps its recorded value')
+    parser.add_argument('--live-summary', action='store_true',
+                        help='also run the compaction experiment with a real summariser '
+                             '(needs a credential; the only thing here that spends money)')
     args = parser.parse_args()
 
+    sections = build_sections(args)
+    unknown = [name for name in (args.only or []) if name not in sections]
+    if unknown:
+        parser.error(f'unknown section(s): {unknown}; choose from {sorted(sections)}')
+    wanted = args.only or list(sections)
+
+    out = Path(args.out)
+    payload = {}
+    if args.only and out.exists():
+        # Re-recording one section must not silently restate the others as if
+        # they had just been measured, and must not drop them either.
+        payload = json.loads(out.read_text(encoding='utf-8'))
+        print(f'keeping the recorded value of {len(payload)} section(s)')
+    payload.update({'python': sys.version.split()[0], 'platform': sys.platform,
+                    'repeats': args.repeats})
+    for name in wanted:
+        shutil.rmtree(WORK, ignore_errors=True)
+        WORK.mkdir(parents=True, exist_ok=True)
+        print(f'running {name} ...', flush=True)
+        payload[name] = sections[name]()
+        out.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
     shutil.rmtree(WORK, ignore_errors=True)
-    WORK.mkdir(parents=True, exist_ok=True)
-    payload = {
-        'python': sys.version.split()[0],
-        'platform': sys.platform,
-        'repeats': args.repeats,
-        'parallel': experiment_parallel(args.repeats, args.calls, (0.0, 0.005, 0.02)),
-        'subagents': experiment_subagents(args.repeats, args.subagents, (0.02, 0.1)),
-        'trace': experiment_trace(args.repeats, (args.turns, args.turns * 10)),
-        'verify': experiment_verify(args.repeats),
-        'recall': experiment_recall((50, 200, 800)),
-        'compaction': experiment_compaction((6, 12, 30), 8),
-        'compaction_repeat': experiment_compaction_repeat((12,), 8),
-        'vector': experiment_vector_recall((50, 200, 800)),
-        'policy': experiment_policy(),
-        'exposure': experiment_exposure(24, (0, 8, 12), 'fix the failing test in the parser'),
-        'recovery': experiment_recovery(24, 8, 'fix the failing test in the parser', 'vector_search'),
-    }
-    report = render(payload)
-    print(report)
-    Path(args.out).write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
-    print(f'raw results written to {args.out}')
-    shutil.rmtree(WORK, ignore_errors=True)
+    if all(name in payload for name in sections):
+        print(render(payload))
+    else:
+        print(f'partial artifact: {sorted(payload)} -- no report, the document describes a full one')
+    print(f'raw results written to {out}')
     return 0
 
 

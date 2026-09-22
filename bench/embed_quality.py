@@ -48,16 +48,60 @@ from mini_harness.memory import Memory  # noqa: E402
 BACKENDS = ('lexical', 'vector', 'hybrid')
 
 # (query, the fact that answers it). The two share no content word at all, so
-# lexical scoring has nothing to match on but "the" and "is". Checked by
-# tests/test_embed_quality.py, which is how four of these were caught sharing a
-# word they were not supposed to.
+# lexical scoring has nothing to match on but function words. Checked by
+# tests/test_embed_quality.py, which is how four of the first six were caught
+# sharing a word they were not supposed to share.
+#
+# Forty pairs rather than six: with six, one query is 17 points, so a difference
+# of one query between two backends was indistinguishable from noise. Forty makes
+# a query worth 2.5 points and lets a real gap show up as a gap.
 PARAPHRASES = [
+    # The first six were the original corpus; the rest were added when the
+    # measurement needed a resolution finer than one query.
     ('when is the maintenance period', 'the deploy window is 02:00 to 04:00 UTC on weekdays'),
     ('what is the name of the credential', 'the service token is stored in SERVICE_TOKEN'),
     ('which socket is it bound to', 'the service listens on port 8443'),
     ('how often may it try again', 'the retry budget is five attempts per request'),
     ('where does the data live', 'the database host is db.internal'),
     ('how long do cached entries live', 'the cache is invalidated every 15 minutes'),
+    ('how many machines run in production', 'the deployment spans three nodes in the cluster'),
+    ('what happens when the queue is saturated', 'excess jobs are rejected with a 429 response'),
+    ('who is responsible for on-call duty', 'the pager rotation belongs to the platform group'),
+    ('how is the secret refreshed', 'credentials are rotated every thirty days by the vault'),
+    ('what is the maximum file size for upload',
+     'a single artifact may not exceed 25 megabytes'),
+    ('which timezone are reports printed in', 'timestamps are stored in UTC'),
+    ('how long are records kept', 'entries older than ninety days are purged'),
+    ('what does the health check return', 'the probe replies with a short status document'),
+    ('which language is the client library written in', 'the SDK is implemented in Go'),
+    ('how many items come back in a listing',
+     'each page returns twenty records unless asked otherwise'),
+    ('how do I turn on verbose logging', 'set the debug flag to see every request'),
+    ('where are the backups kept', 'snapshots are copied to a second region'),
+    ('what is the request throughput ceiling',
+     'the gateway allows two thousand calls per second'),
+    ('which browsers can open the dashboard', 'the console works in current chrome and firefox'),
+    ('what does the licence permit', 'the code may be reused with attribution'),
+    ('how long does a compilation run', 'the pipeline finishes in about four minutes'),
+    ('what wire format is used', 'messages travel over gRPC'),
+    ('how are visitors identified', 'a signed cookie carries the session'),
+    ('what is the intake channel called', 'work is published to the events topic'),
+    ('which engine version must be installed', 'the server expects postgres sixteen'),
+    ('what runs before the process starts', 'migrations execute ahead of boot'),
+    ('how do I suppress the warnings', 'pass the quiet option to the command'),
+    ('how frequently is the search index refreshed', 'the corpus is rebuilt nightly'),
+    ('who must approve a release', 'two reviewers sign off before shipping'),
+    ('how large is the container image', 'the artifact weighs about eighty megabytes'),
+    ('which counters are exported', 'metrics flow to the collector'),
+    ('what does a missing record return', 'the endpoint answers with four hundred and four'),
+    ('how is the cached path keyed', 'entries are hashed from a digest of the location'),
+    ('where does traffic go if a zone dies', 'requests shift to the standby region'),
+    ('how many goroutines does the pool hold', 'the worker set contains eight threads'),
+    ('when does the client give up', 'a request is abandoned after thirty seconds'),
+    ('where should defects be filed', 'issues belong in the tracker'),
+    ('is there a cap on calls per account',
+     'each user may issue one hundred requests a minute'),
+    ('what hour does the nightly export run', 'the batch job starts at 03:15'),
 ]
 FILLER = ('config cache worker queue schema index buffer handler parser session timeout '
           'retry logger metric deploy rollout cluster shard replica window service token '

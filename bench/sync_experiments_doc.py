@@ -47,7 +47,7 @@ HEADERS = {
     'verify': ('| scenario | turns | mutations | verified | verdict | nudges | outcome |',
                '| Scenario | Turns | Mutations | Nudges | `verified` | Outcome |'),
     'recall': ('| Distractors | Archived messages | Top-1 | Top-3 | Search (median) |',),
-    'compaction': ('| Turns | Summariser | Messages before | After | Removed | Facts in context | Archived | Recall top-1 | Recall top-3 | Compact (ms) |',),
+    'compaction': ('| Turns | Summariser | Messages before | After | Removed | Facts verbatim | Words kept | Facts over 60% | Archived | Recall top-1 | Recall top-3 | Compact (ms) |',),
     'compaction_repeat': ('| Turns | Passes | Early facts | Reachable after each pass | Archive entries |',),
     'vector_cost': ('| Distractors | Archived | Texts embedded | Provider calls | Cold query (ms) | Repeat texts | Repeat calls | Warm query (ms) |',),
     'vector_quality': ('| Distractors | Lexical (ms) | Vector (ms) | Hybrid (ms) | Top-1 lexical | Top-1 vector | Top-1 hybrid |',),
@@ -97,7 +97,9 @@ def render_rows(results) -> dict:
         for row in results.get('recall', [])]
     tables['compaction'] = [
         f"| {row['turns']} | {row['summary']} | {row['messages_before']} | {row['messages_after']} | "
-        f"{row['removed']} | {row['facts_in_context']}/{row['facts']} | {row['facts_archived']} | "
+        f"{row['removed']} | {row['facts_in_context']}/{row['facts']} | "
+        f"{row['fact_words_kept']:.2f} | {row['facts_substantially_kept']}/{row['facts']} | "
+        f"{row['facts_archived']} | "
         f"{row['recall_top1']}/{row['asked']} | {row['recall_top3']}/{row['asked']} | "
         f"{row['compact_ms']:.2f} |"
         for row in results.get('compaction', [])]
@@ -184,7 +186,15 @@ def missing_prose(results, document: str) -> list:
     return [line for line in render_prose(results) if ' '.join(line.split()) not in lines]
 
 def sync(doc: Path = DOC, artifact: Path = ARTIFACT) -> tuple:
-    """Rewrite the document's data rows from the artifact. Returns (changed, unplaced)."""
+    """Rewrite the document's data rows from the artifact. Returns (changed, unplaced).
+
+    A row the artifact has and the document does not is *appended* to its table
+    rather than dropped. That case is not hypothetical: re-recording the
+    compaction experiment added a summariser, and this function used to write the
+    artifact's first rows over the document's and silently discard the rest --
+    which lost the thirty-turn group and left the checker to notice. A fixer that
+    cannot add a row cannot fix the document it is told to fix.
+    """
     results = json.loads(Path(artifact).read_text(encoding='utf-8'))
     tables = render_rows(results)
     pending = {table: deque(rows) for table, rows in tables.items()}
@@ -193,6 +203,7 @@ def sync(doc: Path = DOC, artifact: Path = ARTIFACT) -> tuple:
     table = None
     changed = 0
     unplaced = []
+    last_row = {}
     for index, line in enumerate(lines):
         key = _key(line)
         if key in claimed and line.startswith('|'):
@@ -207,8 +218,19 @@ def sync(doc: Path = DOC, artifact: Path = ARTIFACT) -> tuple:
             if lines[index] != pending[table][0]:
                 changed += 1
             lines[index] = pending[table].popleft()
+            last_row[table] = index
         else:
             unplaced.append((table, line))
+
+    # Rows the document had no line for, in the order the artifact lists them,
+    # inserted after the table's last row. Inserting from the bottom keeps the
+    # earlier indices valid.
+    additions = [(last_row[table], list(pending[table]))
+                 for table in TABLES if pending[table] and table in last_row]
+    for anchor, rows in sorted(additions, key = lambda item: -item[0]):
+        lines[anchor + 1:anchor + 1] = rows
+        changed += len(rows)
+
     lines, prose_changed, prose_missing = _sync_prose(lines, results)
     changed += prose_changed
     unplaced += [('prose', lead) for lead in prose_missing]

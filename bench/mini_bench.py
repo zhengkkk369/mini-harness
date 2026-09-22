@@ -33,8 +33,10 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / '.env')
 
-from mini_harness.agent import DeepSeekAgent  # noqa: E402
+from bench.experiments import external_surface  # noqa: E402
+from mini_harness.agent import CORE_TOOLS, DeepSeekAgent  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
+from mini_harness.selector import select  # noqa: E402
 from mini_harness.tool.box import TOOLS  # noqa: E402
 
 WORK = ROOT / '.experiments' / 'mini-bench'
@@ -79,6 +81,27 @@ def trace_counts(path: Path) -> dict:
 def trace_events(path: Path, kind: str) -> list:
     """The events of one kind, in order, for the fields a count cannot carry."""
     return _by_kind(path).get(kind, [])
+
+
+def tool_latency(path: Path) -> dict:
+    """Per-tool-call latency percentiles, in milliseconds.
+
+    The run-level wall clock hides this: one run in this repository finished in
+    283 s because a single tool call waited out its own timeout, and a p95 over
+    runs reports that as "slow runs" rather than "one slow call". Every
+    `tool_result` already carries its own `seconds`, so the distribution is free.
+    """
+    seconds = sorted(event['seconds'] for event in trace_events(path, 'tool_result')
+                     if isinstance(event.get('seconds'), (int, float)))
+    if not seconds:
+        return {'tool_calls': 0, 'tool_p50_ms': 0.0, 'tool_p95_ms': 0.0, 'tool_max_ms': 0.0}
+    def at(fraction):
+        index = min(len(seconds) - 1, max(0, round(fraction * (len(seconds) - 1))))
+        return seconds[index]
+    return {'tool_calls': len(seconds),
+            'tool_p50_ms': round(at(0.50) * 1000, 1),
+            'tool_p95_ms': round(at(0.95) * 1000, 1),
+            'tool_max_ms': round(seconds[-1] * 1000, 1)}
 
 
 def _by_kind(path: Path) -> dict:
@@ -750,6 +773,10 @@ CONFIGS = {
     # The model cannot satisfy the nudge, so this measures what the mechanism
     # does when its precondition holds and its remedy is unavailable.
     'unverifiable': {'policy_deny_tools': ('run_bash', 'run_sandbox')},
+    # Hide all but eight tools and let the ranking choose which. Measured against
+    # the same task set as `baseline`, so the cost of a smaller surface can be
+    # reported as a change in the outcome rather than in the schema only.
+    'budgeted_tools': {'tool_budget': 8},
 }
 
 
@@ -757,7 +784,7 @@ CONFIGS = {
 
 
 def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: float,
-            verbose: bool = False, repeat: int = 0) -> dict:
+            verbose: bool = False, repeat: int = 0, extra_tools: int = 0) -> dict:
     run_dir = WORK / name / f'{task.name}-r{repeat}'
     sandbox = run_dir / 'sandbox'
     shutil.rmtree(run_dir, ignore_errors=True)
@@ -771,7 +798,16 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         max_turns_main=turn_limit,
         wall_budget=timeout,
         **overrides)
-    agent = DeepSeekAgent(TOOLS, cfg=cfg)
+    # The same synthetic bridged surface the offline exposure experiment counts,
+    # so "schema tokens fell by 67%" and "the tasks still pass" describe one tool
+    # surface rather than two.
+    tools = list(TOOLS) + external_surface(extra_tools)
+    agent = DeepSeekAgent(tools, cfg=cfg)
+    # The agent selects the same way for the same task, so the exposed surface is
+    # known up front: without it a budgeted run reports a budget and no evidence
+    # that anything was hidden.
+    pinned = [tool.name for tool in tools if tool.name in CORE_TOOLS]
+    exposed = select(task.prompt, tools, always = pinned, budget = cfg.tool_budget)
 
     start = time.time()
     if verbose:
@@ -824,6 +860,18 @@ def run_one(task: Task, name: str, overrides: dict, turn_limit: int, timeout: fl
         'subagents': len(subagents),
         'subagent_failures': [f"{event.get('agent')}:{event.get('reason')}"
                               for event in subagents if not event.get('ok')],
+        # What the surface was, and whether the budget did anything: a run with a
+        # budget that fits inside the tool count exposes everything and measures
+        # nothing, so the count and the setting are recorded next to each other.
+        'tools_available': len(tools),
+        'tools_exposed': len(exposed),
+        'tool_budget': cfg.tool_budget,
+        'find_tools_calls': counts.get('find_tools', 0),
+        'hidden_tool_refusals': result.failed_by_tag.get('hidden_tool', 0),
+        # Which tools were actually used, so a bridged tool that the model never
+        # needs cannot be confused with one that changed the outcome.
+        'calls_by_tool': result.calls_by_tool,
+        **tool_latency(run_dir / 'trace.jsonl'),
         'seconds': round(elapsed, 1),
     }
 
@@ -868,6 +916,22 @@ def render(rows: list) -> str:
         lines.append(f"| {name} | {passed}/{len(group)} | {passed / len(group):.0%} | "
                      f"{len(group)} | {nudges} | {tokens} | ${cost:.4f} |")
 
+    lines += ['', '| config | tools | exposed | budget | find_tools | refused hidden | '
+              'tool p50 (ms) | tool p95 (ms) |',
+              '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for name, group in by_config.items():
+        latencies = sorted(row.get('tool_p50_ms', 0.0) for row in group)
+        p95s = sorted(row.get('tool_p95_ms', 0.0) for row in group)
+        middle = latencies[len(latencies) // 2]
+        upper = p95s[len(p95s) // 2]
+        exposed_counts = sorted(row.get('tools_exposed', 0) for row in group)
+        lines.append(f"| {name} | {group[0].get('tools_available', 0)} | "
+                     f"{exposed_counts[len(exposed_counts) // 2]} | "
+                     f"{group[0].get('tool_budget', 0)} | "
+                     f"{sum(row.get('find_tools_calls', 0) for row in group)} | "
+                     f"{sum(row.get('hidden_tool_refusals', 0) for row in group)} | "
+                     f"{middle} | {upper} |")
+
     lines += ['', '## failures', '']
     failures = [r for r in rows if not r['passed']]
     if failures:
@@ -892,6 +956,9 @@ def aggregate(rows: list, config: str) -> dict:
     if not group:
         raise ValueError(f'no rows for configuration {config!r}')
     turns = sorted(row['turns'] for row in group)
+    def middle(name, default = 0.0):
+        values = sorted(row.get(name, default) for row in group)
+        return values[len(values) // 2]
     return {
         'config': config,
         'passed': f"{sum(1 for row in group if row['passed'])}/{len(group)}",
@@ -902,6 +969,15 @@ def aggregate(rows: list, config: str) -> dict:
         'nudges': sum(row['nudges'] for row in group),
         'subagent_failures': sum(len(row.get('subagent_failures') or []) for row in group),
         'runs': len(group),
+        # The tool surface, so a budget can be reported as what it changed rather
+        # than as what it was set to. Older artifacts predate these keys.
+        'tools_available': middle('tools_available'),
+        'tools_exposed': middle('tools_exposed'),
+        'tool_budget': middle('tool_budget'),
+        'tool_p50_ms': middle('tool_p50_ms'),
+        'tool_p95_ms': middle('tool_p95_ms'),
+        'find_tools_calls': sum(row.get('find_tools_calls', 0) for row in group),
+        'hidden_tool_refusals': sum(row.get('hidden_tool_refusals', 0) for row in group),
     }
 
 
@@ -998,6 +1074,8 @@ def main() -> int:
     parser.add_argument('--price-cache-in', type=float, default=None,
                         help='dollars per million cached prompt tokens; unset bills them at --price-in')
     parser.add_argument('--verbose', action='store_true', help='do not silence the agent')
+    parser.add_argument('--extra-tools', type=int, default=0,
+                        help='add N synthetic bridged tools, to measure a budget on a large surface')
     args = parser.parse_args()
 
     configs = {k: dict(v) for k, v in CONFIGS.items() if not args.only or k in args.only}
@@ -1013,7 +1091,8 @@ def main() -> int:
         for task in tasks:
             for repeat in range(args.repeats):
                 print(f'running {name}/{task.name} r{repeat + 1}/{args.repeats} ...', flush=True)
-                row = run_one(task, name, overrides, args.turns, args.timeout, args.verbose, repeat)
+                row = run_one(task, name, overrides, args.turns, args.timeout, args.verbose, repeat,
+                              extra_tools = args.extra_tools)
                 rows.append(row)
                 print(f'  -> {"pass" if row["passed"] else "FAIL"} in {row["seconds"]}s, '
                       f'{row["turns"]} turns, {row["calls"]} calls, {row["nudges"]} nudges '

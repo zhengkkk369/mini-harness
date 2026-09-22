@@ -347,6 +347,54 @@ def test_no_override_leaves_the_configurations_alone():
 # ------------------------------------------------------------------ the recorded rows
 
 
+def test_tool_latency_reads_the_durations_the_trace_already_carries(tmp_path):
+    """The run-level wall clock cannot say which call was slow.
+
+    One run in this repository finished in 283 s because a single tool call waited
+    out its own timeout; a p95 over runs reports that as "a slow run". Every
+    `tool_result` carries its own `seconds`, so the distribution is free.
+    """
+    path = tmp_path / 'trace.jsonl'
+    events = [{'event': 'tool_result', 'tool': f't{i}', 'seconds': value}
+              for i, value in enumerate([0.01, 0.02, 0.03, 0.04, 2.0])]
+    events.append({'event': 'turn', 'seconds': 99.0})
+    path.write_text('\n'.join(json.dumps(event) for event in events) + '\n', encoding='utf-8')
+
+    latency = mini_bench.tool_latency(path)
+
+    assert latency['tool_calls'] == 5
+    assert latency['tool_p50_ms'] == 30.0
+    assert latency['tool_p95_ms'] == 2000.0
+    assert latency['tool_max_ms'] == 2000.0
+
+
+def test_tool_latency_of_a_missing_trace_is_zero_not_an_error(tmp_path):
+    latency = mini_bench.tool_latency(tmp_path / 'absent.jsonl')
+
+    assert latency == {'tool_calls': 0, 'tool_p50_ms': 0.0, 'tool_p95_ms': 0.0, 'tool_max_ms': 0.0}
+
+
+def test_the_extra_tools_are_the_same_surface_the_exposure_experiment_counts():
+    """The A/B and the payload measurement have to describe one tool surface.
+
+    Otherwise "schema tokens fell by 67%" and "the tasks still pass" would be
+    about two different things, which is exactly the confusion the tier exists to
+    avoid.
+    """
+    from bench.experiments import experiment_exposure
+
+    surface = list(mini_bench.TOOLS) + mini_bench.external_surface(24)
+    exposure = experiment_exposure(24, (0, 8), 'fix the failing test in the parser')
+
+    assert len(surface) == exposure[0]['exposed'] == 36
+    assert len({tool.name for tool in surface}) == 36
+
+
+def test_the_budgeted_configuration_asks_for_a_real_field():
+    assert mini_bench.CONFIGS['budgeted_tools'] == {'tool_budget': 8}
+    assert 'tool_budget' in {field.name for field in fields(Config)}
+
+
 def test_a_recorded_run_carries_the_accounting_its_cost_is_quoted_with():
     """`cost` alone hides a 4x difference, and hides any subtask that was billed.
 

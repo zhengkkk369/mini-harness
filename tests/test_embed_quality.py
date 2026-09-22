@@ -20,8 +20,18 @@ from bench import embed_quality  # noqa: E402
 from mini_harness.config import Config  # noqa: E402
 from mini_harness.memory import tokens  # noqa: E402
 
-COMMON = {'the', 'is', 'it', 'on', 'in', 'of', 'to', 'a', 'and', 'does', 'do', 'are', 'how',
-          'what', 'when', 'where', 'which', 'many', 'times', 'long', 'live', 'name'}
+COMMON = {
+    "the", "is", "it", "on", "in", "of", "to", "a", "an", "and", "or", "does", "do", "did",
+    "are", "was", "were", "be", "been", "being", "how", "what", "when", "where", "which",
+    "who", "why", "many", "much", "times", "long", "live", "name", "there", "that", "this",
+    "these", "those", "their", "they", "them", "he", "she", "his", "her", "its", "i", "my",
+    "me", "we", "us", "our", "you", "your", "for", "from", "by", "with", "at", "as", "if",
+    "not", "no", "may", "must", "can", "could", "will", "would", "should", "shall", "might",
+    "has", "have", "had", "am", "per", "each", "every", "some", "any", "all", "both", "few",
+    "more", "most", "other", "same", "own", "too", "very", "also", "only", "just", "still",
+    "yet", "even", "well", "about", "after", "before", "again", "over", "up", "down", "out",
+    "off", "here", "now", "then", "than", "so", "into",
+}
 
 
 # ------------------------------------------------------------------ the corpus
@@ -36,6 +46,15 @@ def test_every_query_is_a_paraphrase_rather_than_a_lookup():
     for query, fact in embed_quality.PARAPHRASES:
         shared = set(tokens(query)) & set(tokens(fact)) - COMMON
         assert shared <= COMMON, f'{query!r} and its fact share {sorted(shared)}'
+
+
+def test_the_corpus_is_large_enough_to_read_a_gap():
+    """Six queries made one query 17 points, which is why it was extended.
+
+    Forty puts a query at 2.5 points, so the ten-point gap between lexical and
+    vector scoring is a gap rather than a coin flip.
+    """
+    assert len(embed_quality.PARAPHRASES) >= 40
 
 
 def test_the_facts_are_distinguishable():

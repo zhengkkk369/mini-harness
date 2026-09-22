@@ -374,9 +374,10 @@ semantic one — [EXPERIMENTS.md](EXPERIMENTS.md) reports what it measures, and 
 explicit that it says nothing about the quality of a real embedding model.
 
 That measurement has since been run against a real model
-(`text-embedding-v4`): on six paraphrase queries it lifts top-1 from lexical
-scoring's 1/6 to 3–4/6, and fusion does not beat it. The numbers, the cost of
-each backend and what the corpus cannot resolve are in
+(`text-embedding-v4`): on forty paraphrase queries it lifts top-1 from lexical
+scoring's 2/40 to 21–23/40, and fusion (RRF) reaches only 8/40 — half of a fused
+ranking is lexical noise on this query shape. The numbers, the cost of each
+backend and what the corpus cannot resolve are in
 [MODEL_EVAL.md](MODEL_EVAL.md) section 5; `bench/embed_quality.py` re-runs it.
 
 ## MCP servers
@@ -508,10 +509,20 @@ Two rules keep the cap safe rather than lossy:
 - vector_search: search a vector index for similar documents
 ```
 
-With 24 bridged tools and a budget of 8, the request carries 5,834 characters
-instead of 17,869 — a third of the schema payload — and the ranked tool is back
+With 24 bridged tools and a budget of 8, the request carries 6,149 characters
+instead of 18,557 — a third of the schema payload — and the ranked tool is back
 in one call. The measurement, including that recovery, is in
 [EXPERIMENTS.md](EXPERIMENTS.md).
+
+The cap was also measured on tasks rather than on a payload: the harder tier with
+the same 36-tool surface, `baseline` against a budget of 8, five repeats each.
+Both passed 15/15, with **63% fewer prompt tokens and 42% lower cost**
+(977,280 → 358,489 tokens, $0.0323 → $0.0187). One run tried the hidden
+`run_bash` — the ranking had put `recall` and `skills` ahead of it — was refused,
+and finished with `run_sandbox`; `find_tools` was never needed. One tier is not a
+licence to set a low budget everywhere: a task that needs exactly the tool the
+ranking dropped pays for the miss, and the ranking is lexical. Section 6 of
+[MODEL_EVAL.md](MODEL_EVAL.md) has the numbers.
 
 The budget is off by default, and deliberately conservative when on: the ranking
 is lexical, so a task whose wording does not resemble a tool description is

@@ -193,38 +193,54 @@ Reading this:
 
 ## 5. Compaction fidelity
 
-A conversation with six planted facts is compacted once. The summariser is a stub
-in both directions on purpose: `verbatim` returns the removed text, which no real
-model does, and `losing` returns a sentence that mentions nothing. Reality sits
-between them, and that gap is the part this experiment cannot measure.
+A conversation with six planted facts is compacted once. Two stub summarisers
+bracket the machinery: `verbatim` returns the removed text, which no real model
+does, and `losing` returns a sentence that mentions nothing. A third row runs the
+real model in the loop, which is the row that answers the question the other two
+cannot. `Facts verbatim` is an exact-substring test; `Words kept` is the share of
+each fact's own words still present and `Facts over 60%` counts the facts with at
+least that much of their wording left, so a summary that paraphrases is not
+scored as a loss.
 
-| Turns | Summariser | Messages before | After | Removed | Facts in context | Archived | Recall top-1 | Recall top-3 | Compact (ms) |
+| Turns | Summariser | Messages before | After | Removed | Facts verbatim | Words kept | Facts over 60% | Archived | Recall top-1 | Recall top-3 | Compact (ms) |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 6 | verbatim | 55 | 10 | 45 | 6/6 | 5 | 5/5 | 5/5 | 5.76 |
-| 6 | losing | 55 | 10 | 45 | 1/6 | 5 | 5/5 | 5/5 | 7.07 |
-| 12 | verbatim | 103 | 10 | 93 | 6/6 | 6 | 6/6 | 6/6 | 6.02 |
-| 12 | losing | 103 | 10 | 93 | 0/6 | 6 | 6/6 | 6/6 | 7.06 |
-| 30 | verbatim | 247 | 10 | 237 | 6/6 | 6 | 6/6 | 6/6 | 6.71 |
-| 30 | losing | 247 | 10 | 237 | 0/6 | 6 | 6/6 | 6/6 | 6.21 |
+| 6 | verbatim | 55 | 10 | 45 | 6/6 | 1.00 | 6/6 | 5 | 5/5 | 5/5 | 7.62 |
+| 6 | losing | 55 | 10 | 45 | 1/6 | 0.17 | 1/6 | 5 | 5/5 | 5/5 | 13.92 |
+| 6 | model | 55 | 10 | 45 | 1/6 | 1.00 | 6/6 | 5 | 5/5 | 5/5 | 11767.57 |
+| 12 | verbatim | 103 | 10 | 93 | 6/6 | 1.00 | 6/6 | 6 | 6/6 | 6/6 | 6.19 |
+| 12 | losing | 103 | 10 | 93 | 0/6 | 0.00 | 0/6 | 6 | 6/6 | 6/6 | 5.58 |
+| 12 | model | 103 | 10 | 93 | 0/6 | 0.88 | 6/6 | 6 | 6/6 | 6/6 | 7571.83 |
+| 30 | verbatim | 247 | 10 | 237 | 6/6 | 1.00 | 6/6 | 6 | 6/6 | 6/6 | 7.35 |
+| 30 | losing | 247 | 10 | 237 | 0/6 | 0.00 | 0/6 | 6 | 6/6 | 6/6 | 6.63 |
+| 30 | model | 247 | 10 | 237 | 0/6 | 0.92 | 6/6 | 6 | 6/6 | 6/6 | 9210.72 |
 
 Reading it:
 
 - **The machinery loses nothing.** Every fact that leaves the context is in the
   archive, and recall puts it first: 5/5 and 6/6 at every size. "Retrievable
   memory" means reachable, not forgotten.
-- **The summariser decides what stays in context, and the range is the whole
-  range.** With a summary that carries the removed text, 6/6 facts are still in
-  context; with one that carries nothing, 0/6 are (the 6-turn row keeps 1/6
-  because that fact was never removed). Nothing here flatters the default
-  summariser prompt -- it is simply unmeasured, and this table shows how much
-  rests on it.
+- **A real summariser keeps the substance and not the sentences.** The `model`
+  rows reproduce almost none of the planted facts *word for word* -- 1/6 at six
+  turns, 0/6 at twelve and thirty -- which is what a summary is for. The
+  paraphrase-tolerant reading is the one that matters: 88-100% of each fact's own
+  words are still present and **all six facts survive in substance at every
+  size**. A model does not have to quote to keep something.
+- **So the fault line is the archive, not the summary.** With a summary that
+  carries nothing, 0/6 facts are left in context and the archive is what makes
+  them reachable (6/6); with a real summary, the context already carries them.
+  The stub rows are the bounds, and the live row shows the mechanism does not sit
+  near the bottom of them.
 - **One pass can remove almost everything.** At 30 turns, 237 of 247 messages
   leave the context and 10 remain: after that, the summary is the only carrier of
   the rest, which is why `recall` exists as the second path.
-- **Compaction in one pass is cheap**: 5-31 ms here, and the real cost is the
-  summariser's own model call. The spread between stubs is the stub's doing -- a
-  verbatim summary is a much longer string to write -- not a property of the
-  mechanism.
+- **The machinery is cheap and the summary is not.** A stub pass costs 5-14 ms;
+  the same pass through the model costs **7.6-11.8 s**, three orders of magnitude
+  more. The real cost of compaction is the summariser call, and that is the number
+  to budget with -- the local work is free by comparison.
+- **What is recorded, and what is not.** The live row carries the first 400
+  characters of the summary it produced, so the claim can be read rather than
+  believed. It does *not* measure whether the summary is true: a summary can keep
+  every noun and invert the meaning, and nothing here would notice.
 
 ### Re-compaction
 
@@ -397,17 +413,20 @@ executed. Both paths are covered in `tests/test_selector.py`.
   there straddle zero, and the shorter run sits entirely inside them. Recorded
   runs put the per-event cost between 0.03 and 0.31 ms. Treat it as
   "of order 0.1 ms per event", not a constant.
-- **The compaction experiment measures the machinery, not the summary.** Its
-  summariser is a stub at both extremes -- one returns the removed text verbatim,
-  which no real model does, and one returns a sentence that mentions nothing. The
-  table therefore brackets what a real summariser can achieve; it does not
-  measure one, and nothing here should be read as a score for the default
-  summarisation prompt. Measuring that needs a model in the loop.
+- **The compaction experiment measures the machinery and one real summariser.**
+  The `verbatim` and `losing` rows are stubs at the extremes, and they bracket the
+  machinery rather than describe a model. The `model` row is a real summariser
+  through the real call path, so the default prompt does have a reading now --
+  with two limits: it is one model at one temperature on one synthetic
+  conversation, and neither the exact-substring column nor the word-coverage
+  column checks whether the summary is *true*. A summary that keeps every noun and
+  inverts the meaning passes both.
 - **Retrieval was measured on synthetic text.** Five planted facts per size,
   against filler that shares vocabulary with the queries. Real conversation
   queries are messier, and the useful message may share no rare token with them.
   The provider-backed measurement in [MODEL_EVAL.md](MODEL_EVAL.md) section 5 uses
-  six paraphrase queries, so one query is 17 points there.
+  forty paraphrase queries, so one query is 2.5 points there -- enough to tell a
+  ten-point gap from noise, not enough for a two-point one.
 - **The exposure experiment measures a payload, not a request.** It counts the
   serialised schemas of the tools a budget selects. The token column is a
   `chars / 4` estimate, not a tokenizer count, and the bridged surface is

@@ -31,7 +31,7 @@ DOC = ROOT / 'MODEL_EVAL.md'
 # The artifacts whose per-configuration summaries the document carries as rows in
 # the canonical shape.
 TABLE_ARTIFACTS = ('MINI_BENCH_HARD.json', 'MINI_BENCH_NUDGE.json',
-                   'MINI_BENCH_LONG.json', 'MINI_BENCH_WEAK.json')
+                   'MINI_BENCH_LONG.json', 'MINI_BENCH_WEAK.json', 'MINI_BENCH_TOOLS.json')
 # The older two predate that shape: the unpriced 72-run aggregate has no cost to
 # show and the priced one is a single configuration with its own columns. Their
 # values are still checked, just not as a whole row.
