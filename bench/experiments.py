@@ -50,7 +50,11 @@ from mini_harness.tool import box  # noqa: E402
 from mini_harness.tool.box import TOOLS, ToolDefinition, find_tools  # noqa: E402
 from mini_harness.trace import TRACE  # noqa: E402
 
-WORK = Path('.experiments').resolve()
+# This tool's own work area, deliberately a subdirectory: `main` removes it at
+# the start and end of a run, and it used to be `.experiments` itself, which
+# deleted the benchmark's run directories -- and with them the tool-call traces a
+# latency figure has to be recomputed from.
+WORK = Path('.experiments') / 'mechanisms'
 READ_TOOL = next(tool for tool in TOOLS if tool.name == 'read_file')
 BASH_TOOL = next(tool for tool in TOOLS if tool.name == 'run_bash')
 

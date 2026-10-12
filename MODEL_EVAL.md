@@ -610,12 +610,17 @@ against `budgeted_tools` exposing 8, three tasks at five repeats each.
   not a licence to set a low budget everywhere — a task needing exactly the tool
   the ranking dropped would pay for the miss, and the ranking is lexical.
 
-The same run also gives tool-level latency, which the run-level wall clock hides:
-across 264 tool calls the **p50 is 43 ms and the p95 is 7.2 s**, and the whole
-upper tail is `run_sandbox` (median 5.0 s, max 11.4 s) — a container call that
-starts a sandbox and runs a suite. Reading, editing and globbing are 15–39 ms. A
-p95 taken over *runs* therefore measures how many container calls a run made, not
-how slow its tooling is.
+The same run also gives tool-level latency, which the run-level wall clock hides.
+Every row of `MINI_BENCH_TOOLS.json` carries the percentiles of its own tool calls,
+so the number is recomputable from the artifact: across the 30 runs (201 calls) the
+**median per-run p50 is 47 ms and the median per-run p95 is 6.3 s**, and the slowest
+single call is **11.4 s**. The two configurations differ because they used different
+tools — `baseline` (p50 median 83 ms, p95 median 4.6 s) ran the shipped suite
+through `run_bash` 31 times, while `budgeted_tools` (43 ms / 7.2 s) mostly used
+`run_sandbox`, which pays for a container start per call. A per-tool split of that
+recording put `run_sandbox` at a median of 5.0 s against 15–39 ms for reading,
+editing and globbing, so the upper tail is the sandbox: a p95 taken over *runs*
+measures how many container calls a run made, not how slow its tooling is.
 
 ## Limitations
 
@@ -661,9 +666,9 @@ how slow its tooling is.
   repeated before a tool batch runs, which bounds the overshoot to one request
   rather than a request plus its batch; a single long tool call can still overrun.
   Recording per-call time makes the size of that overshoot readable rather than
-  anecdotal: across 264 tool calls in the tool-budget run the p50 is 43 ms and the
-  p95 is 7.2 s, and the tail is entirely `run_sandbox` — a container start plus a
-  suite (median 5.0 s, max 11.4 s). The bound on an overshoot is therefore one
+  anecdotal: across the 30 runs of the tool-budget tier the median per-run tool p50
+  is 47 ms and the p95 is 6.3 s, with the slowest single call at 11.4 s — a
+  container start plus a suite. The bound on an overshoot is therefore one
   container call, not a turn.
 - **Prices move, and peak is double off-peak.** The cost figures come from the
   provider's published rates on the day, at off-peak. Re-check them before

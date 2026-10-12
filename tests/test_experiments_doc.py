@@ -221,3 +221,26 @@ def test_a_real_environment_key_wins_and_needs_no_file(monkeypatch, tmp_path):
     assert _real_key(tmp_path / 'absent.env') == 'sk-from-environment'
 
 
+# ------------------------------------------------------------------ work areas
+
+
+def test_the_experiment_runner_does_not_wipe_another_tools_output():
+    """Its cleanup used to remove `.experiments` itself.
+
+    That took the benchmark's run directories with it, and with them the
+    per-call traces a latency figure has to be recomputed from: the number went
+    on living in the document after the evidence for it had been deleted. Each
+    tool now owns a subdirectory, and this keeps them from nesting.
+    """
+    from pathlib import Path
+
+    from bench import experiments, mini_bench
+
+    mine = Path(experiments.WORK).resolve()
+    theirs = Path(mini_bench.WORK).resolve()
+
+    assert mine != theirs
+    assert theirs not in mine.parents, f'{theirs} would be deleted by cleaning {mine}'
+    assert mine not in theirs.parents
+
+
